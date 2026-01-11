@@ -205,10 +205,24 @@ run_agent() {
                 "$PROMPT" 2>&1
         fi
     elif [ "$AGENT_CLI" = "claude" ]; then
-        claude --dangerously-spawn-permission \
-            "$(cat "$BEAD_FILE")" \
-            "$PROGRESS_FILE" \
-            "$PROMPT" 2>&1 || true
+        # Combine bead details and prompt into a single prompt
+        local FULL_PROMPT="$(cat "$BEAD_FILE")
+
+---
+Progress file: $PROGRESS_FILE
+
+$PROMPT"
+
+        if [ -n "$MODEL" ]; then
+            claude -p \
+                --dangerously-skip-permissions \
+                --model "$MODEL" \
+                "$FULL_PROMPT" 2>&1
+        else
+            claude -p \
+                --dangerously-skip-permissions \
+                "$FULL_PROMPT" 2>&1
+        fi
     fi
 }
 
