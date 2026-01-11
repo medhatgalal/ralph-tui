@@ -18,6 +18,7 @@ import {
   executeLogsCommand,
   executeTemplateCommand,
   executeInitCommand,
+  executeConvertCommand,
 } from './commands/index.js';
 
 /**
@@ -32,6 +33,7 @@ Usage: ralph-tui [command] [options]
 Commands:
   (none)              Launch the interactive TUI
   init [options]      Create a new PRD interactively
+  convert [options]   Convert PRD markdown to JSON format
   run [options]       Start Ralph execution
   resume [options]    Resume an interrupted session
   status              Check session status
@@ -60,9 +62,16 @@ Resume Options:
   --headless          Run without TUI
   --force             Override stale lock
 
+Convert Options:
+  --to <format>       Target format: json
+  --output, -o <path> Output file path (default: ./prd.json)
+  --branch, -b <name> Git branch name (prompts if not provided)
+  --force, -f         Overwrite existing files
+
 Examples:
   ralph-tui                              # Start the TUI
   ralph-tui init                         # Create a new PRD interactively
+  ralph-tui convert --to json ./prd.md   # Convert PRD to JSON
   ralph-tui run                          # Start execution with defaults
   ralph-tui run --epic myproject-epic    # Run with specific epic
   ralph-tui run --prd ./prd.json         # Run with PRD file
@@ -95,6 +104,12 @@ async function handleSubcommand(args: string[]): Promise<boolean> {
   // Init command
   if (command === 'init') {
     await executeInitCommand(args.slice(1));
+    return true;
+  }
+
+  // Convert command
+  if (command === 'convert') {
+    await executeConvertCommand(args.slice(1));
     return true;
   }
 

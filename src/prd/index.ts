@@ -35,3 +35,7 @@ export {
 
 // Wizard
 export { runPrdWizard, prdExists } from './wizard.js';
+
+// Parser
+export type { ParsedPrd, ParseOptions } from './parser.js';
+export { parsePrdMarkdown, parsedPrdToGeneratedPrd } from './parser.js';

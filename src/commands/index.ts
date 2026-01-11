@@ -54,3 +54,9 @@ export {
   parseInitArgs,
   printInitHelp,
 } from './init.js';
+
+export {
+  executeConvertCommand,
+  parseConvertArgs,
+  printConvertHelp,
+} from './convert.js';
