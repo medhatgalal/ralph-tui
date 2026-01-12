@@ -110,6 +110,9 @@ export interface AgentExecuteOptions {
 
   /** Callback when execution ends */
   onEnd?: (result: AgentExecutionResult) => void;
+
+  /** Enable subagent tracing for structured output (JSONL format for Claude) */
+  subagentTracing?: boolean;
 }
 
 /**

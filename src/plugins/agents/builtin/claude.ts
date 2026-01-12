@@ -1,7 +1,8 @@
 /**
  * ABOUTME: Claude Code agent plugin for the claude CLI.
  * Integrates with Anthropic's Claude Code CLI for AI-assisted coding.
- * Supports: print mode execution, model selection, file context, timeout, graceful interruption.
+ * Supports: print mode execution, model selection, file context, timeout, graceful interruption,
+ * and JSONL output parsing for subagent tracing.
  */
 
 import { spawn } from 'node:child_process';
@@ -14,6 +15,42 @@ import type {
   AgentSetupQuestion,
   AgentDetectResult,
 } from '../types.js';
+
+/**
+ * Represents a parsed JSONL message from Claude Code output.
+ * Claude Code emits various event types as JSON objects, one per line.
+ */
+export interface ClaudeJsonlMessage {
+  /** The type of message (e.g., 'assistant', 'user', 'result', 'system') */
+  type?: string;
+  /** Message content for text messages */
+  message?: string;
+  /** Tool use information if applicable */
+  tool?: {
+    name?: string;
+    input?: Record<string, unknown>;
+  };
+  /** Result data for completion messages */
+  result?: unknown;
+  /** Cost information if provided */
+  cost?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalUSD?: number;
+  };
+  /** Session ID for conversation tracking */
+  sessionId?: string;
+  /** Raw parsed JSON for custom handling */
+  raw: Record<string, unknown>;
+}
+
+/**
+ * Result of parsing a JSONL line.
+ * Success contains the parsed message, failure contains the raw text.
+ */
+export type JsonlParseResult =
+  | { success: true; message: ClaudeJsonlMessage }
+  | { success: false; raw: string; error: string };
 
 /**
  * Claude Code agent plugin implementation.
@@ -254,15 +291,18 @@ export class ClaudeAgentPlugin extends BaseAgentPlugin {
   protected buildArgs(
     _prompt: string,
     files?: AgentFileContext[],
-    _options?: AgentExecuteOptions
+    options?: AgentExecuteOptions
   ): string[] {
     const args: string[] = [];
 
     // Add print mode flag for non-interactive output
     args.push('--print');
 
-    // Add output format based on printMode setting
-    if (this.printMode === 'json') {
+    // Add output format based on subagentTracing option or printMode setting
+    // When subagentTracing is enabled, force JSON output for structured event parsing
+    if (options?.subagentTracing) {
+      args.push('--output-format', 'json');
+    } else if (this.printMode === 'json') {
       args.push('--output-format', 'json');
     } else if (this.printMode === 'stream') {
       args.push('--output-format', 'stream-json');
@@ -340,6 +380,188 @@ export class ClaudeAgentPlugin extends BaseAgentPlugin {
     }
 
     return null;
+  }
+
+  /**
+   * Parse a single line of JSONL output from Claude Code.
+   * Attempts to parse as JSON, falls back to raw text on failure.
+   *
+   * @param line A single line of output (may include newline characters)
+   * @returns Parse result with either the parsed message or raw text
+   */
+  static parseJsonlLine(line: string): JsonlParseResult {
+    const trimmed = line.trim();
+
+    // Skip empty lines
+    if (!trimmed) {
+      return { success: false, raw: line, error: 'Empty line' };
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+
+      // Build the structured message from parsed JSON
+      const message: ClaudeJsonlMessage = {
+        raw: parsed,
+      };
+
+      // Extract common fields if present
+      if (typeof parsed.type === 'string') {
+        message.type = parsed.type;
+      }
+      if (typeof parsed.message === 'string') {
+        message.message = parsed.message;
+      }
+      if (typeof parsed.sessionId === 'string') {
+        message.sessionId = parsed.sessionId;
+      }
+      if (parsed.result !== undefined) {
+        message.result = parsed.result;
+      }
+
+      // Extract tool information if present
+      if (parsed.tool && typeof parsed.tool === 'object') {
+        const toolObj = parsed.tool as Record<string, unknown>;
+        message.tool = {
+          name: typeof toolObj.name === 'string' ? toolObj.name : undefined,
+          input:
+            toolObj.input && typeof toolObj.input === 'object'
+              ? (toolObj.input as Record<string, unknown>)
+              : undefined,
+        };
+      }
+
+      // Extract cost information if present
+      if (parsed.cost && typeof parsed.cost === 'object') {
+        const costObj = parsed.cost as Record<string, unknown>;
+        message.cost = {
+          inputTokens:
+            typeof costObj.inputTokens === 'number'
+              ? costObj.inputTokens
+              : undefined,
+          outputTokens:
+            typeof costObj.outputTokens === 'number'
+              ? costObj.outputTokens
+              : undefined,
+          totalUSD:
+            typeof costObj.totalUSD === 'number' ? costObj.totalUSD : undefined,
+        };
+      }
+
+      return { success: true, message };
+    } catch (err) {
+      // JSON parsing failed - return as raw text
+      return {
+        success: false,
+        raw: line,
+        error: err instanceof Error ? err.message : 'Parse error',
+      };
+    }
+  }
+
+  /**
+   * Parse a complete JSONL output string from Claude Code.
+   * Handles multi-line output, parsing each line independently.
+   * Lines that fail to parse are returned as raw text in the fallback array.
+   *
+   * @param output Complete output string (may contain multiple lines)
+   * @returns Object with parsed messages and any raw fallback lines
+   */
+  static parseJsonlOutput(output: string): {
+    messages: ClaudeJsonlMessage[];
+    fallback: string[];
+  } {
+    const messages: ClaudeJsonlMessage[] = [];
+    const fallback: string[] = [];
+
+    const lines = output.split('\n');
+
+    for (const line of lines) {
+      const result = ClaudeAgentPlugin.parseJsonlLine(line);
+      if (result.success) {
+        messages.push(result.message);
+      } else if (result.raw.trim()) {
+        // Only add non-empty lines to fallback
+        fallback.push(result.raw);
+      }
+    }
+
+    return { messages, fallback };
+  }
+
+  /**
+   * Create a streaming JSONL parser that accumulates partial lines.
+   * Use this for processing streaming output where data chunks may
+   * split across line boundaries.
+   *
+   * @returns Parser object with push() method and getState() to retrieve results
+   */
+  static createStreamingJsonlParser(): {
+    push: (chunk: string) => JsonlParseResult[];
+    flush: () => JsonlParseResult[];
+    getState: () => { messages: ClaudeJsonlMessage[]; fallback: string[] };
+  } {
+    let buffer = '';
+    const messages: ClaudeJsonlMessage[] = [];
+    const fallback: string[] = [];
+
+    return {
+      /**
+       * Push a chunk of data to the parser.
+       * Returns any complete lines that were parsed.
+       */
+      push(chunk: string): JsonlParseResult[] {
+        buffer += chunk;
+        const results: JsonlParseResult[] = [];
+
+        // Process complete lines (ending with newline)
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+
+          const result = ClaudeAgentPlugin.parseJsonlLine(line);
+          results.push(result);
+
+          if (result.success) {
+            messages.push(result.message);
+          } else if (result.raw.trim()) {
+            fallback.push(result.raw);
+          }
+        }
+
+        return results;
+      },
+
+      /**
+       * Flush any remaining buffered content.
+       * Call this when the stream ends to process any trailing content.
+       */
+      flush(): JsonlParseResult[] {
+        if (!buffer.trim()) {
+          buffer = '';
+          return [];
+        }
+
+        const result = ClaudeAgentPlugin.parseJsonlLine(buffer);
+        buffer = '';
+
+        if (result.success) {
+          messages.push(result.message);
+        } else if (result.raw.trim()) {
+          fallback.push(result.raw);
+        }
+
+        return [result];
+      },
+
+      /**
+       * Get the current accumulated state.
+       */
+      getState(): { messages: ClaudeJsonlMessage[]; fallback: string[] } {
+        return { messages, fallback };
+      },
+    };
   }
 }
 

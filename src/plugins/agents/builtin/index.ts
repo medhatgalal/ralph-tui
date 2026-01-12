@@ -21,3 +21,7 @@ export function registerBuiltinAgents(): void {
 
 // Export the factory functions for direct use
 export { createClaudeAgent, createOpenCodeAgent };
+
+// Export Claude JSONL parsing types and utilities
+export type { ClaudeJsonlMessage, JsonlParseResult } from './claude.js';
+export { ClaudeAgentPlugin } from './claude.js';
