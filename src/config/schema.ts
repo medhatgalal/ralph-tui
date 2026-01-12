@@ -102,6 +102,12 @@ export const StoredConfigSchema = z
     // Error handling
     errorHandling: ErrorHandlingConfigSchema.optional(),
 
+    // Fallback agents (shorthand for default agent)
+    fallbackAgents: z.array(z.string().min(1)).optional(),
+
+    // Rate limit handling (shorthand for default agent)
+    rateLimitHandling: RateLimitHandlingConfigSchema.optional(),
+
     // Custom prompt template path
     prompt_template: z.string().optional(),
 

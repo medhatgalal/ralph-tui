@@ -258,15 +258,35 @@ function getDefaultAgentConfig(
   const registry = getAgentRegistry();
   const plugins = registry.getRegisteredPlugins();
 
-  // Helper to apply agentOptions shorthand to config
+  // Helper to apply shorthand config fields to agent config
   const applyAgentOptions = (config: AgentPluginConfig): AgentPluginConfig => {
+    let result = config;
+
+    // Apply agentOptions shorthand
     if (storedConfig.agentOptions) {
-      return {
-        ...config,
-        options: { ...config.options, ...storedConfig.agentOptions },
+      result = {
+        ...result,
+        options: { ...result.options, ...storedConfig.agentOptions },
       };
     }
-    return config;
+
+    // Apply fallbackAgents shorthand (only if not already set on agent config)
+    if (storedConfig.fallbackAgents && !result.fallbackAgents) {
+      result = {
+        ...result,
+        fallbackAgents: storedConfig.fallbackAgents,
+      };
+    }
+
+    // Apply rateLimitHandling shorthand (only if not already set on agent config)
+    if (storedConfig.rateLimitHandling && !result.rateLimitHandling) {
+      result = {
+        ...result,
+        rateLimitHandling: storedConfig.rateLimitHandling,
+      };
+    }
+
+    return result;
   };
 
   // Check CLI override first
@@ -551,6 +571,18 @@ export async function validateConfig(
         } else {
           errors.push(`PRD file not found or not readable: ${config.prdPath}`);
         }
+      }
+    }
+  }
+
+  // Validate fallback agents are available
+  if (config.agent.fallbackAgents && config.agent.fallbackAgents.length > 0) {
+    for (const fallbackName of config.agent.fallbackAgents) {
+      // Check if fallback is a known plugin or a configured agent
+      if (!agentRegistry.hasPlugin(fallbackName)) {
+        warnings.push(
+          `Fallback agent '${fallbackName}' not found in available plugins; it may not be installed`
+        );
       }
     }
   }
