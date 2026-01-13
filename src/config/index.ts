@@ -664,6 +664,94 @@ export function getProjectConfigDir(cwd: string = process.cwd()): string {
   return join(cwd, PROJECT_CONFIG_DIR);
 }
 
+/**
+ * Result of checking setup status.
+ */
+export interface SetupCheckResult {
+  /** Whether setup is complete (config exists with agent configured) */
+  ready: boolean;
+  /** Whether any config file exists */
+  configExists: boolean;
+  /** Whether an agent is configured */
+  agentConfigured: boolean;
+  /** Path to config that was found (if any) */
+  configPath: string | null;
+  /** Human-readable message about what's missing */
+  message?: string;
+}
+
+/**
+ * Check if ralph-tui setup has been completed.
+ * Verifies that a config file exists and an agent is configured.
+ * @param cwd Working directory for finding project config
+ * @returns Setup check result
+ */
+export async function checkSetupStatus(
+  cwd: string = process.cwd()
+): Promise<SetupCheckResult> {
+  const { config, source } = await loadStoredConfigWithSource(cwd);
+
+  const configExists = source.globalLoaded || source.projectLoaded;
+  const configPath = source.projectPath || source.globalPath;
+
+  // Check if an agent is configured
+  const agentConfigured = !!(config.agent || config.defaultAgent);
+
+  if (!configExists) {
+    return {
+      ready: false,
+      configExists: false,
+      agentConfigured: false,
+      configPath: null,
+      message: 'No configuration found. Run "ralph-tui setup" to configure.',
+    };
+  }
+
+  if (!agentConfigured) {
+    return {
+      ready: false,
+      configExists: true,
+      agentConfigured: false,
+      configPath,
+      message: 'No agent configured. Run "ralph-tui setup" to configure an agent.',
+    };
+  }
+
+  return {
+    ready: true,
+    configExists: true,
+    agentConfigured: true,
+    configPath,
+  };
+}
+
+/**
+ * Require setup to be complete, exit with error if not.
+ * Call this at the start of commands that need an agent.
+ * @param cwd Working directory
+ * @param commandName Name of the command (for error message)
+ */
+export async function requireSetup(
+  cwd: string = process.cwd(),
+  commandName: string = 'This command'
+): Promise<void> {
+  const status = await checkSetupStatus(cwd);
+
+  if (!status.ready) {
+    console.error('');
+    console.error(`${commandName} requires ralph-tui to be configured.`);
+    console.error('');
+    if (status.message) {
+      console.error(`  ${status.message}`);
+    }
+    console.error('');
+    console.error('Quick setup:');
+    console.error('  ralph-tui setup');
+    console.error('');
+    process.exit(1);
+  }
+}
+
 // Constants for external use
 export const CONFIG_PATHS = {
   global: GLOBAL_CONFIG_PATH,

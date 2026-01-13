@@ -8,6 +8,8 @@
 
 Ralph TUI connects your AI coding assistant (Claude Code, OpenCode) to your task tracker (prd.json, Beads) and runs them in an autonomous loop, completing tasks one-by-one with intelligent selection, error handling, and full visibility into what's happening.
 
+![Ralph TUI Screenshot](docs/images/ralph-tui.png)
+
 ---
 
 ## Table of Contents

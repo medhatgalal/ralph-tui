@@ -1,22 +1,37 @@
 /**
  * ABOUTME: PRD Chat application component for the Ralph TUI.
  * Provides an interactive chat interface for generating PRDs using an AI agent.
- * Manages conversation state, keyboard input, and PRD detection/saving.
+ * After PRD generation, shows a split view with PRD preview and tracker options.
  */
 
 import type { ReactNode } from 'react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useKeyboard } from '@opentui/react';
 import { writeFile, mkdir, access } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ChatView } from './ChatView.js';
+import { ConfirmationDialog } from './ConfirmationDialog.js';
 import { ChatEngine, createPrdChatEngine, slugify } from '../../chat/engine.js';
 import type { ChatMessage, ChatEvent } from '../../chat/types.js';
 import type { AgentPlugin } from '../../plugins/agents/types.js';
+import { colors } from '../theme.js';
 
 /**
  * Props for the PrdChatApp component
  */
+/**
+ * Result of PRD creation including tracker selection
+ */
+export interface PrdCreationResult {
+  /** Path to the generated PRD markdown file */
+  prdPath: string;
+  /** Name of the feature */
+  featureName: string;
+  /** Tracker format selected (if any) */
+  selectedTracker?: 'json' | 'beads' | null;
+}
+
 export interface PrdChatAppProps {
   /** Agent plugin to use for generating responses */
   agent: AgentPlugin;
@@ -31,7 +46,7 @@ export interface PrdChatAppProps {
   timeout?: number;
 
   /** Callback when PRD is successfully generated */
-  onComplete: (prdPath: string, featureName: string) => void;
+  onComplete: (result: PrdCreationResult) => void;
 
   /** Callback when user cancels */
   onCancel: () => void;
@@ -52,6 +67,78 @@ What feature would you like to build? Describe it in a few sentences, and I'll a
 };
 
 /**
+ * Tracker option for task generation
+ */
+interface TrackerOption {
+  key: string;
+  name: string;
+  skillPrompt: string;
+  available: boolean;
+}
+
+/**
+ * Get available tracker options based on project setup
+ */
+function getTrackerOptions(cwd: string): TrackerOption[] {
+  const beadsDir = join(cwd, '.beads');
+  const hasBeads = existsSync(beadsDir);
+
+  return [
+    {
+      key: '1',
+      name: 'JSON (prd.json)',
+      skillPrompt: 'Convert this PRD to prd.json format using the ralph-tui-create-json skill.',
+      available: true,
+    },
+    {
+      key: '2',
+      name: 'Beads issues',
+      skillPrompt: 'Convert this PRD to beads using the ralph-tui-create-beads skill.',
+      available: hasBeads,
+    },
+  ];
+}
+
+/**
+ * PRD Preview component for the right panel
+ */
+function PrdPreview({ content, path }: { content: string; path: string }): ReactNode {
+  return (
+    <box
+      style={{
+        width: '100%',
+        height: '100%',
+        flexDirection: 'column',
+        backgroundColor: colors.bg.secondary,
+        border: true,
+        borderColor: colors.border.normal,
+      }}
+    >
+      {/* Header */}
+      <box
+        style={{
+          height: 3,
+          paddingLeft: 1,
+          paddingRight: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: colors.bg.tertiary,
+        }}
+      >
+        <text fg={colors.accent.primary}>PRD Preview</text>
+        <text fg={colors.fg.muted}>{path.split('/').pop()}</text>
+      </box>
+
+      {/* Content - scrollable, shows full PRD */}
+      <scrollbox style={{ flexGrow: 1, padding: 1 }} stickyScroll={false}>
+        <text fg={colors.fg.primary}>{content}</text>
+      </scrollbox>
+    </box>
+  );
+}
+
+/**
  * PrdChatApp component - Main application for PRD chat generation
  */
 export function PrdChatApp({
@@ -63,7 +150,15 @@ export function PrdChatApp({
   onCancel,
   onError,
 }: PrdChatAppProps): ReactNode {
-  // State
+  // Phase: 'chat' for PRD generation, 'review' for tracker selection
+  const [phase, setPhase] = useState<'chat' | 'review'>('chat');
+
+  // PRD data (set when PRD is detected)
+  const [prdContent, setPrdContent] = useState<string | null>(null);
+  const [prdPath, setPrdPath] = useState<string | null>(null);
+  const [featureName, setFeatureName] = useState<string | null>(null);
+
+  // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -71,27 +166,39 @@ export function PrdChatApp({
   const [streamingChunk, setStreamingChunk] = useState('');
   const [error, setError] = useState<string | undefined>();
 
+  // Quit confirmation dialog state
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+
+  // Track which tracker format was selected for tasks
+  const [selectedTrackerFormat, setSelectedTrackerFormat] = useState<'json' | 'beads' | null>(null);
+
   // Refs
   const engineRef = useRef<ChatEngine | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Get tracker options
+  const trackerOptions = getTrackerOptions(cwd);
 
   // Initialize chat engine
   useEffect(() => {
+    isMountedRef.current = true;
     const engine = createPrdChatEngine(agent, { cwd, timeout });
 
     // Subscribe to events
     const unsubscribe = engine.on((event: ChatEvent) => {
       switch (event.type) {
         case 'status:changed':
-          // Could update UI based on status
           break;
 
         case 'prd:detected':
-          // PRD was detected, save it
-          void savePrd(event.prdContent, event.featureName);
+          // PRD was detected - save and switch to review phase
+          void handlePrdDetected(event.prdContent, event.featureName);
           break;
 
         case 'error:occurred':
-          setError(event.error);
+          if (isMountedRef.current) {
+            setError(event.error);
+          }
           onError?.(event.error);
           break;
       }
@@ -100,14 +207,15 @@ export function PrdChatApp({
     engineRef.current = engine;
 
     return () => {
+      isMountedRef.current = false;
       unsubscribe();
     };
   }, [agent, cwd, timeout, onError]);
 
   /**
-   * Save the PRD content to a file
+   * Handle PRD detection - save file and switch to review phase
    */
-  const savePrd = async (content: string, featureName: string) => {
+  const handlePrdDetected = async (content: string, name: string) => {
     try {
       const fullOutputDir = join(cwd, outputDir);
 
@@ -119,24 +227,125 @@ export function PrdChatApp({
       }
 
       // Generate filename
-      const slug = slugify(featureName);
+      const slug = slugify(name);
       const filename = `prd-${slug}.md`;
       const filepath = join(fullOutputDir, filename);
 
       // Write the file
       await writeFile(filepath, content, 'utf-8');
 
-      // Notify completion
-      onComplete(filepath, featureName);
+      // Update state for review phase
+      if (isMountedRef.current) {
+        setPrdContent(content);
+        setPrdPath(filepath);
+        setFeatureName(name);
+        setPhase('review');
+
+        // Add tracker options message
+        const availableOptions = trackerOptions.filter((t) => t.available);
+        const optionsText = availableOptions
+          .map((t) => `  [${t.key}] ${t.name}`)
+          .join('\n');
+
+        const reviewMessage: ChatMessage = {
+          role: 'assistant',
+          content: `PRD saved to: ${filepath}
+
+Would you like me to create tasks from this PRD?
+
+${optionsText}
+  [3] Done - I'll create tasks later
+
+Press a number key to select, or continue chatting.`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, reviewMessage]);
+      }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      setError(`Failed to save PRD: ${errorMsg}`);
+      if (isMountedRef.current) {
+        setError(`Failed to save PRD: ${errorMsg}`);
+      }
       onError?.(errorMsg);
     }
   };
 
   /**
-   * Send a message to the agent
+   * Handle tracker selection - send skill prompt to agent
+   */
+  const handleTrackerSelect = useCallback(
+    async (option: TrackerOption) => {
+      if (!engineRef.current || !prdPath || isLoading) return;
+
+      // Record which tracker format was selected
+      const format = option.key === '1' ? 'json' : 'beads';
+      setSelectedTrackerFormat(format as 'json' | 'beads');
+
+      setIsLoading(true);
+      setStreamingChunk('');
+      setLoadingStatus(`Creating ${option.name} tasks...`);
+
+      // Add user selection message
+      const userMsg: ChatMessage = {
+        role: 'user',
+        content: `Create ${option.name} tasks`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+
+      const prompt = `${option.skillPrompt}
+
+The PRD file is at: ${prdPath}
+
+Read the PRD and create the appropriate tasks.`;
+
+      try {
+        const result = await engineRef.current.sendMessage(prompt, {
+          onChunk: (chunk) => {
+            if (isMountedRef.current) {
+              setStreamingChunk((prev) => prev + chunk);
+            }
+          },
+          onStatus: (status) => {
+            if (isMountedRef.current) {
+              setLoadingStatus(status);
+            }
+          },
+        });
+
+        if (isMountedRef.current) {
+          if (result.success && result.response) {
+            setMessages((prev) => [...prev, result.response!]);
+            setStreamingChunk('');
+
+            // Add completion message and finish
+            const doneMsg: ChatMessage = {
+              role: 'assistant',
+              content: 'Tasks created! Press [3] to finish or select another format.',
+              timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, doneMsg]);
+          } else if (!result.success) {
+            setError(result.error || 'Failed to create tasks');
+          }
+        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        if (isMountedRef.current) {
+          setError(errorMsg);
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setIsLoading(false);
+          setLoadingStatus('');
+        }
+      }
+    },
+    [prdPath, isLoading]
+  );
+
+  /**
+   * Send a chat message to the agent
    */
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || !engineRef.current || isLoading) {
@@ -150,7 +359,6 @@ export function PrdChatApp({
     setLoadingStatus('Sending to agent...');
     setError(undefined);
 
-    // Add user message to display immediately
     const userMsg: ChatMessage = {
       role: 'user',
       content: userMessage,
@@ -161,26 +369,35 @@ export function PrdChatApp({
     try {
       const result = await engineRef.current.sendMessage(userMessage, {
         onChunk: (chunk) => {
-          setStreamingChunk((prev) => prev + chunk);
+          if (isMountedRef.current) {
+            setStreamingChunk((prev) => prev + chunk);
+          }
         },
         onStatus: (status) => {
-          setLoadingStatus(status);
+          if (isMountedRef.current) {
+            setLoadingStatus(status);
+          }
         },
       });
 
-      if (result.success && result.response) {
-        // Add assistant response to messages
-        setMessages((prev) => [...prev, result.response!]);
-        setStreamingChunk('');
-      } else if (!result.success) {
-        setError(result.error || 'Failed to get response');
+      if (isMountedRef.current) {
+        if (result.success && result.response) {
+          setMessages((prev) => [...prev, result.response!]);
+          setStreamingChunk('');
+        } else if (!result.success) {
+          setError(result.error || 'Failed to get response');
+        }
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      setError(errorMsg);
+      if (isMountedRef.current) {
+        setError(errorMsg);
+      }
     } finally {
-      setIsLoading(false);
-      setLoadingStatus('');
+      if (isMountedRef.current) {
+        setIsLoading(false);
+        setLoadingStatus('');
+      }
     }
   }, [inputValue, isLoading]);
 
@@ -189,18 +406,50 @@ export function PrdChatApp({
    */
   const handleKeyboard = useCallback(
     (key: { name: string; sequence?: string }) => {
-      // Don't process keys while loading
-      if (isLoading) {
-        // Allow Ctrl+C to cancel
-        if (key.name === 'c' && key.sequence === '\x03') {
-          // Could implement interrupt here
+      // Handle quit confirmation dialog
+      if (showQuitConfirm) {
+        if (key.name === 'y' || key.sequence === 'y' || key.sequence === 'Y') {
+          setShowQuitConfirm(false);
+          onCancel();
+        } else if (key.name === 'n' || key.name === 'escape' || key.sequence === 'n' || key.sequence === 'N') {
+          setShowQuitConfirm(false);
         }
         return;
       }
 
+      // Don't process keys while loading
+      if (isLoading) {
+        return;
+      }
+
+      // In review phase, handle number keys for tracker selection
+      if (phase === 'review' && key.sequence) {
+        const keyNum = key.sequence;
+        if (keyNum === '1' || keyNum === '2') {
+          const option = trackerOptions.find((t) => t.key === keyNum && t.available);
+          if (option) {
+            void handleTrackerSelect(option);
+            return;
+          }
+        }
+        if (keyNum === '3') {
+          // Done - complete and exit
+          if (prdPath && featureName) {
+            onComplete({ prdPath, featureName, selectedTracker: selectedTrackerFormat });
+          }
+          return;
+        }
+      }
+
       switch (key.name) {
         case 'escape':
-          onCancel();
+          if (phase === 'review' && prdPath && featureName) {
+            // In review phase, escape completes (PRD already saved)
+            onComplete({ prdPath, featureName, selectedTracker: selectedTrackerFormat });
+          } else {
+            // In chat phase, show confirmation dialog
+            setShowQuitConfirm(true);
+          }
           break;
 
         case 'return':
@@ -213,31 +462,90 @@ export function PrdChatApp({
           break;
 
         default:
-          // Handle regular character input
-          if (key.sequence && key.sequence.length === 1 && key.sequence.charCodeAt(0) >= 32) {
-            setInputValue((prev) => prev + key.sequence);
+          // Handle regular character input and pasted content
+          if (key.sequence) {
+            const printableChars = key.sequence
+              .split('')
+              .filter((char) => char.charCodeAt(0) >= 32)
+              .join('');
+
+            if (printableChars.length > 0) {
+              setInputValue((prev) => prev + printableChars);
+            }
           }
           break;
       }
     },
-    [isLoading, sendMessage, onCancel]
+    [showQuitConfirm, isLoading, phase, trackerOptions, handleTrackerSelect, prdPath, featureName, selectedTrackerFormat, onComplete, onCancel, sendMessage]
   );
 
   useKeyboard(handleKeyboard);
 
+  // Determine hint text based on phase
+  const hint =
+    phase === 'review'
+      ? '[1] JSON  [2] Beads  [3] Done  [Enter] Chat  [Esc] Finish'
+      : '[Enter] Send  [Esc] Cancel';
+
+  // In review phase, show split pane
+  if (phase === 'review' && prdContent && prdPath) {
+    return (
+      <box
+        style={{
+          width: '100%',
+          height: '100%',
+          flexDirection: 'row',
+        }}
+      >
+        {/* Left pane: Chat */}
+        <box style={{ width: '60%', height: '100%' }}>
+          <ChatView
+            title="PRD Creator"
+            subtitle="Task Generation"
+            messages={messages}
+            inputValue={inputValue}
+            isLoading={isLoading}
+            loadingStatus={loadingStatus}
+            streamingChunk={streamingChunk}
+            inputPlaceholder="Ask questions or select a format..."
+            error={error}
+            inputEnabled={!isLoading}
+            hint={hint}
+            agentName={agent.meta.name}
+          />
+        </box>
+
+        {/* Right pane: PRD Preview */}
+        <box style={{ width: '40%', height: '100%' }}>
+          <PrdPreview content={prdContent} path={prdPath} />
+        </box>
+      </box>
+    );
+  }
+
+  // Chat phase: single pane with quit confirmation dialog
   return (
-    <ChatView
-      title="PRD Creator"
-      subtitle={`Using ${agent.meta.name}`}
-      messages={messages}
-      inputValue={inputValue}
-      isLoading={isLoading}
-      loadingStatus={loadingStatus}
-      streamingChunk={streamingChunk}
-      inputPlaceholder="Describe your feature..."
-      error={error}
-      inputEnabled={!isLoading}
-      hint="[Enter] Send  [Esc] Cancel"
-    />
+    <box style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <ChatView
+        title="PRD Creator"
+        subtitle={`Using ${agent.meta.name}`}
+        messages={messages}
+        inputValue={inputValue}
+        isLoading={isLoading}
+        loadingStatus={loadingStatus}
+        streamingChunk={streamingChunk}
+        inputPlaceholder="Describe your feature..."
+        error={error}
+        inputEnabled={!isLoading && !showQuitConfirm}
+        hint={hint}
+        agentName={agent.meta.name}
+      />
+      <ConfirmationDialog
+        visible={showQuitConfirm}
+        title="Cancel PRD Creation?"
+        message="Your progress will be lost."
+        hint="[y] Yes, cancel  [n/Esc] No, continue"
+      />
+    </box>
   );
 }
