@@ -6,7 +6,8 @@
 
 import type { ReactNode } from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { TextareaRenderable } from '@opentui/core';
+import { useKeyboard } from '@opentui/react';
+import type { TextareaRenderable, KeyEvent } from '@opentui/core';
 import { colors } from '../theme.js';
 import type { ChatMessage } from '../../chat/types.js';
 
@@ -162,6 +163,31 @@ export function ChatView({
     const currentValue = textareaRef.current?.plainText ?? '';
     onSubmit?.(currentValue);
   }, [onSubmit]);
+
+  // Handle keyboard for Enter key submission
+  // Enter = submit, Shift+Enter or Ctrl+J = insert newline
+  const handleKeyboard = useCallback(
+    (key: KeyEvent) => {
+      // Only handle if textarea is focused and input is enabled
+      if (!textareaRef.current || !inputEnabled || isLoading) {
+        return;
+      }
+
+      // Check for Enter key (without modifiers for submit)
+      if (key.name === 'return' && !key.meta && !key.ctrl && !key.shift) {
+        // Prevent default behavior (newline) and submit instead
+        key.preventDefault?.();
+        handleSubmit();
+        return;
+      }
+
+      // Check for Ctrl+J or Shift+Enter - allow default behavior (newline)
+      // These don't need special handling, just let them through
+    },
+    [inputEnabled, isLoading, handleSubmit]
+  );
+
+  useKeyboard(handleKeyboard);
 
   return (
     <box

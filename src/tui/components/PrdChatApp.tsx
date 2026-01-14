@@ -501,7 +501,7 @@ Read the PRD and create the appropriate tasks.`;
   const hint =
     phase === 'review'
       ? '[1] JSON  [2] Beads  [3] Done  [Enter] Chat  [Esc] Finish'
-      : '[Ctrl+Enter] Send  [Esc] Cancel';
+      : '[Enter] Send  [Shift+Enter/Ctrl+J] Newline  [Esc] Cancel';
 
   // In review phase, show split pane
   if (phase === 'review' && prdContent && prdPath) {
