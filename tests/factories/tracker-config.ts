@@ -38,14 +38,15 @@ export function createJsonTrackerConfig(
   prdPath = './prd.json',
   overrides: Partial<Omit<TrackerPluginConfig, 'plugin'>> = {}
 ): TrackerPluginConfig {
+  const { options: overrideOptions, ...rest } = overrides;
   return createTrackerConfig({
-    name: 'json',
+    ...rest,
+    name: rest.name ?? 'json',
     plugin: 'json',
     options: {
+      ...(overrideOptions ?? {}),
       prdPath,
-      ...overrides.options,
     },
-    ...overrides,
   });
 }
 
@@ -56,14 +57,15 @@ export function createBeadsTrackerConfig(
   epicId = 'test-epic',
   overrides: Partial<Omit<TrackerPluginConfig, 'plugin'>> = {}
 ): TrackerPluginConfig {
+  const { options: overrideOptions, ...rest } = overrides;
   return createTrackerConfig({
-    name: 'beads',
+    ...rest,
+    name: rest.name ?? 'beads',
     plugin: 'beads',
     options: {
+      ...(overrideOptions ?? {}),
       epicId,
-      ...overrides.options,
     },
-    ...overrides,
   });
 }
 
@@ -74,13 +76,14 @@ export function createBeadsBvTrackerConfig(
   epicId = 'test-epic',
   overrides: Partial<Omit<TrackerPluginConfig, 'plugin'>> = {}
 ): TrackerPluginConfig {
+  const { options: overrideOptions, ...rest } = overrides;
   return createTrackerConfig({
-    name: 'beads-bv',
+    ...rest,
+    name: rest.name ?? 'beads-bv',
     plugin: 'beads-bv',
     options: {
+      ...(overrideOptions ?? {}),
       epicId,
-      ...overrides.options,
     },
-    ...overrides,
   });
 }

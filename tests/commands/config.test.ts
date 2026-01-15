@@ -13,6 +13,8 @@ const mockLoadStoredConfigWithSource = mock(() => Promise.resolve({
   source: {
     globalPath: null,
     projectPath: null,
+    globalLoaded: false,
+    projectLoaded: false,
   },
 }));
 const mockSerializeConfig = mock((config: StoredConfig) => '# Empty config');
@@ -189,40 +191,56 @@ describe('config command', () => {
       const source: ConfigSource = {
         globalPath: null,
         projectPath: null,
+        globalLoaded: false,
+        projectLoaded: false,
       };
 
       expect(source.globalPath).toBeNull();
       expect(source.projectPath).toBeNull();
+      expect(source.globalLoaded).toBe(false);
+      expect(source.projectLoaded).toBe(false);
     });
 
     test('global source only', () => {
       const source: ConfigSource = {
         globalPath: '~/.config/ralph-tui/config.toml',
         projectPath: null,
+        globalLoaded: true,
+        projectLoaded: false,
       };
 
       expect(source.globalPath).toBe('~/.config/ralph-tui/config.toml');
       expect(source.projectPath).toBeNull();
+      expect(source.globalLoaded).toBe(true);
+      expect(source.projectLoaded).toBe(false);
     });
 
     test('project source only', () => {
       const source: ConfigSource = {
         globalPath: null,
         projectPath: '/home/user/project/.ralph-tui/config.toml',
+        globalLoaded: false,
+        projectLoaded: true,
       };
 
       expect(source.globalPath).toBeNull();
       expect(source.projectPath).toBe('/home/user/project/.ralph-tui/config.toml');
+      expect(source.globalLoaded).toBe(false);
+      expect(source.projectLoaded).toBe(true);
     });
 
     test('both sources found', () => {
       const source: ConfigSource = {
         globalPath: '~/.config/ralph-tui/config.toml',
         projectPath: '/home/user/project/.ralph-tui/config.toml',
+        globalLoaded: true,
+        projectLoaded: true,
       };
 
       expect(source.globalPath).toBe('~/.config/ralph-tui/config.toml');
       expect(source.projectPath).toBe('/home/user/project/.ralph-tui/config.toml');
+      expect(source.globalLoaded).toBe(true);
+      expect(source.projectLoaded).toBe(true);
     });
   });
 

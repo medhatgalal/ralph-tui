@@ -129,17 +129,10 @@ describe('BeadsTrackerPlugin status mapping', () => {
   // These tests verify the conversion between bd status and TrackerTaskStatus
 
   describe('task conversion', () => {
-    test('bead ID with dot infers parent ID', async () => {
-      // When a bead has ID like "epic-123.45", parent should be "epic-123"
-      // This tests the ID parsing logic in beadToTask
-      const plugin = new BeadsTrackerPlugin();
-
-      // The plugin parses bead IDs to infer parent relationships
-      // e.g., "ralph-tui-45r.37" -> parent is "ralph-tui-45r"
-      // This is tested indirectly through the actual getTasks implementation
-
-      await plugin.dispose();
-    });
+    test.todo('bead ID with dot infers parent ID - requires mocking bd CLI output');
+    // When a bead has ID like "epic-123.45", parent should be "epic-123"
+    // This tests the ID parsing logic in beadToTask/getTasks
+    // Implementation would require mocking the bd CLI to return beads with dotted IDs
   });
 });
 

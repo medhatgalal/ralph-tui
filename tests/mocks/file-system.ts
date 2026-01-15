@@ -38,9 +38,11 @@ export class MockFileSystem {
     });
 
     // Ensure parent directories exist
-    const parts = path.split('/');
-    for (let i = 1; i < parts.length; i++) {
-      this.directories.add(parts.slice(0, i).join('/'));
+    const isAbsolute = path.startsWith('/');
+    const segments = path.split('/').filter(Boolean);
+    for (let i = 1; i < segments.length; i++) {
+      const dir = (isAbsolute ? '/' : '') + segments.slice(0, i).join('/');
+      this.directories.add(dir);
     }
   }
 

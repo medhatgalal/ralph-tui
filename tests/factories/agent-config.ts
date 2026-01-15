@@ -38,14 +38,15 @@ export function createAgentConfig(
 export function createClaudeAgentConfig(
   overrides: Partial<Omit<AgentPluginConfig, 'plugin'>> = {}
 ): AgentPluginConfig {
+  const { options: overrideOptions, ...rest } = overrides;
   return createAgentConfig({
-    name: 'claude',
+    ...rest,
+    name: rest.name ?? 'claude',
     plugin: 'claude',
     options: {
+      ...(overrideOptions ?? {}),
       model: 'claude-sonnet-4-20250514',
-      ...overrides.options,
     },
-    ...overrides,
   });
 }
 

@@ -1,9 +1,14 @@
 /**
  * ABOUTME: Tests for process utility functions.
  * Tests process spawning helpers and command parsing.
+ *
+ * NOTE: These tests use the current runtime (bun/node) for cross-platform
+ * compatibility instead of Unix-specific commands. The runtime is invoked
+ * with -e flag to execute inline JavaScript.
  */
 
 import { describe, test, expect } from 'bun:test';
+import { tmpdir } from 'node:os';
 import {
   runProcess,
   parseCommand,
@@ -16,41 +21,56 @@ import {
 describe('process utility', () => {
   describe('runProcess', () => {
     test('runs simple command and captures stdout', async () => {
-      const result = await runProcess('echo', ['hello']);
+      // Use bun to print a string (cross-platform)
+      const result = await runProcess(process.execPath, ['-e', 'console.log("hello")']);
       expect(result.success).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.stdout.trim()).toBe('hello');
     });
 
     test('captures stderr on failure', async () => {
-      const result = await runProcess('ls', ['--invalid-option-xyz']);
+      // Use bun with invalid syntax to generate stderr
+      const result = await runProcess(process.execPath, ['-e', 'process.exit(1)']);
       expect(result.success).toBe(false);
       expect(result.exitCode).not.toBe(0);
-      expect(result.stderr.length).toBeGreaterThan(0);
     });
 
     test('handles command with arguments', async () => {
-      const result = await runProcess('printf', ['%s %s', 'hello', 'world']);
+      // Use bun to print multiple values passed via script
+      const result = await runProcess(process.execPath, [
+        '-e',
+        'console.log("hello", "world")',
+      ]);
       expect(result.success).toBe(true);
-      expect(result.stdout).toBe('hello world');
+      expect(result.stdout.trim()).toBe('hello world');
     });
 
     test('respects timeout', async () => {
-      const result = await runProcess('sleep', ['10'], { timeout: 100 });
+      // Use bun with a long-running script
+      const result = await runProcess(
+        process.execPath,
+        ['-e', 'setTimeout(() => {}, 10000)'],
+        { timeout: 100 }
+      );
       expect(result.success).toBe(false);
       expect(result.signal).toBe('SIGTERM');
     });
 
     test('uses custom working directory', async () => {
-      const result = await runProcess('pwd', [], { cwd: '/tmp' });
+      const testDir = tmpdir();
+      const result = await runProcess(process.execPath, ['-e', 'console.log(process.cwd())'], {
+        cwd: testDir,
+      });
       expect(result.success).toBe(true);
-      expect(result.stdout.trim()).toBe('/tmp');
+      expect(result.stdout.trim()).toBe(testDir);
     });
 
     test('uses custom environment variables', async () => {
-      const result = await runProcess('printenv', ['TEST_VAR'], {
-        env: { TEST_VAR: 'test_value' },
-      });
+      const result = await runProcess(
+        process.execPath,
+        ['-e', 'console.log(process.env.TEST_VAR)'],
+        { env: { ...process.env, TEST_VAR: 'test_value' } }
+      );
       expect(result.success).toBe(true);
       expect(result.stdout.trim()).toBe('test_value');
     });

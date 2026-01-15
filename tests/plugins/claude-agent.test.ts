@@ -15,7 +15,14 @@ describe('ClaudeAgentPlugin', () => {
   });
 
   afterEach(async () => {
-    await plugin.dispose();
+    // Guard against double-dispose when explicit dispose test runs
+    try {
+      if (await plugin.isReady()) {
+        await plugin.dispose();
+      }
+    } catch {
+      // Ignore errors from already-disposed plugin
+    }
   });
 
   describe('metadata', () => {
