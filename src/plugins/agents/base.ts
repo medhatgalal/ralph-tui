@@ -80,6 +80,7 @@ import type {
   AgentExecutionHandle,
   AgentSetupQuestion,
   AgentExecutionStatus,
+  AgentSandboxRequirements,
 } from './types.js';
 
 /**
@@ -207,6 +208,15 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
         });
       }, 5000);
     });
+  }
+
+  getSandboxRequirements(): AgentSandboxRequirements {
+    return {
+      authPaths: [],
+      binaryPaths: [],
+      runtimePaths: [],
+      requiresNetwork: false,
+    };
   }
 
   /**

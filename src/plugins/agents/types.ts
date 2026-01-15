@@ -203,6 +203,13 @@ export interface AgentPluginConfig {
   rateLimitHandling?: RateLimitHandlingConfig;
 }
 
+export interface AgentSandboxRequirements {
+  authPaths: string[];
+  binaryPaths: string[];
+  runtimePaths: string[];
+  requiresNetwork: boolean;
+}
+
 /**
  * Metadata about an agent plugin.
  */
@@ -285,6 +292,8 @@ export interface AgentPlugin {
    * @returns Detection result with availability and version info
    */
   detect(): Promise<AgentDetectResult>;
+
+  getSandboxRequirements(): AgentSandboxRequirements;
 
   /**
    * Execute the agent with a prompt and optional file context.
