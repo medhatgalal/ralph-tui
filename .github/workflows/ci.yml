@@ -56,11 +56,14 @@ jobs:
       - name: Check coverage threshold
         run: |
           # Extract coverage percentage from bun test output
-          COVERAGE=$(grep -E "^All files" coverage-output.txt | awk '{print $4}' | tr -d '%' || echo "0")
+          COVERAGE=$(grep -E "^All files" coverage-output.txt | awk '{print $4}' | tr -d '%' || true)
           if [ -z "$COVERAGE" ]; then
             # Try alternative parsing
-            COVERAGE=$(grep -E "[0-9]+\.[0-9]+%" coverage-output.txt | tail -1 | grep -oE "[0-9]+\.[0-9]+" | head -1 || echo "0")
+            COVERAGE=$(grep -E "[0-9]+\.[0-9]+%" coverage-output.txt | tail -1 | grep -oE "[0-9]+\.[0-9]+" | head -1 || true)
           fi
+          # Normalize: strip whitespace/% and default to 0 if empty
+          COVERAGE=$(echo "$COVERAGE" | tr -d '% \t\n')
+          [ -z "$COVERAGE" ] && COVERAGE="0"
           echo "Coverage: $COVERAGE%"
           # Check if coverage is below 40%
           if [ "$(echo "$COVERAGE < 40" | bc -l)" -eq 1 ]; then
