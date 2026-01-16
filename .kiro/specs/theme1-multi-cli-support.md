@@ -669,7 +669,7 @@ bun install -g ralph-tui
 |----------|----------|-------|
 | Unified approval mode abstraction? | **C) Hybrid** | Unified `approval` setting + `default_flags` override |
 | Subagent tracing for Kiro? | **B) Skip** + activity indicator | Show "working..." status, no detailed tracing |
-| Skills installation scope? | **A) All detected CLIs** | Install for each CLI detected during setup |
+| Skills installation scope? | **Selected agent (default)** | Install for selected agent; option to install for all detected CLIs |
 | Default agent selection? | **C) Config + fallback** | User chooses at setup, can change later via config or `--agent` flag |
 
 ---
@@ -678,10 +678,14 @@ bun install -g ralph-tui
 
 ### 10.1 Skills Installation Strategy
 
-**Install skills for ALL detected CLIs:**
-- Only install for CLIs that are actually detected (don't install Codex skills if Codex not present)
-- User selects default agent at setup
-- Skills enable using ralph-tui capabilities directly inside each CLI
+**Default behavior (unchanged from original):**
+- Install skills for the SELECTED agent only
+- This preserves backward compatibility
+
+**Optional: Install to all detected CLIs:**
+- User can choose to install skills to all detected CLIs during setup
+- Prompt: "Also install skills for other detected CLIs?"
+- Only offered if multiple CLIs are detected
 
 **Skills per CLI:**
 
@@ -697,7 +701,8 @@ bun install -g ralph-tui
 **At Setup:**
 - Detect all available CLIs
 - User selects default agent
-- Install skills for all detected CLIs
+- Install skills for selected agent (default)
+- Optionally install skills for other detected CLIs
 
 **At Runtime:**
 - `ralph-tui run` - Uses default from config

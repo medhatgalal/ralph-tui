@@ -351,3 +351,36 @@ All three CLIs support non-interactive execution:
 - Created memory system for continuity
 - User wants iterative partnership approach
 - Next: CLI capability research
+
+
+---
+
+## Lessons Learned (2026-01-16)
+
+### Additive vs Breaking Changes
+
+**Key Principle:** When extending existing software, changes should be ADDITIVE, not modify default behaviors.
+
+**What we got right:**
+- Adding new agent plugins (gemini, codex, kiro) - purely additive
+- Adding config normalization for map-style syntax - backward compatible
+- Adding multi-CLI skill installer functions - available but not forced
+
+**What we initially got wrong:**
+- Changed default skill installation from "selected agent only" to "all detected CLIs"
+- This was a behavior change, not an additive feature
+
+**Correction:**
+- Reverted to original behavior: install skills to selected agent only
+- Added OPTIONAL prompt: "Also install skills for other detected CLIs?" (default: false)
+- This preserves backward compatibility while enabling new functionality
+
+### Design Principle for Theme 1
+
+> "Make ralph-tui work just as well with Gemini, Codex, and Kiro as it does with Claude"
+
+This means:
+1. Add support for new CLIs (additive)
+2. Don't change how existing Claude users experience the tool
+3. New features should be opt-in, not opt-out
+4. Reserve breaking changes for Theme 2 (EngOS integration)

@@ -30,6 +30,7 @@ import {
 } from './prompts.js';
 import {
   listBundledSkills,
+  installSkill,
   installSkillToAllClis,
   isSkillInstalled,
   type CliType,
@@ -325,16 +326,17 @@ export async function runSetupWizard(
     printSection('AI Skills Installation');
 
     const bundledSkills = await listBundledSkills();
-    // Get list of detected CLI IDs for skill installation
+    // Get list of detected CLI IDs for optional multi-CLI installation
     const detectedCliIds = agentPlugins.filter(p => p.available).map(p => p.id);
+    const otherDetectedClis = detectedCliIds.filter(id => id !== selectedAgent);
 
-    if (bundledSkills.length > 0 && detectedCliIds.length > 0) {
+    if (bundledSkills.length > 0) {
       printInfo('Ralph TUI includes AI skills that enhance agent capabilities.');
-      printInfo(`Skills will be installed for detected CLIs: ${detectedCliIds.join(', ')}`);
+      printInfo('Installing skills ensures you have the latest versions.');
       console.log();
 
       for (const skill of bundledSkills) {
-        // Check if installed for any CLI (use selected agent as primary check)
+        // Check if installed for selected agent (original behavior)
         const alreadyInstalled = await isSkillInstalled(skill.name, selectedAgent as CliType, cwd);
         const actionLabel = alreadyInstalled ? 'Update' : 'Install';
 
@@ -343,42 +345,53 @@ export async function runSetupWizard(
           {
             default: true,
             help: alreadyInstalled
-              ? `${skill.description} (update for all detected CLIs)`
-              : `${skill.description} (install for all detected CLIs)`,
+              ? `${skill.description} (currently installed - update to latest)`
+              : skill.description,
           }
         );
 
         if (installThisSkill) {
-          // Install to all detected CLIs
-          const results = await installSkillToAllClis(skill.name, detectedCliIds, { force: true, cwd });
-          
-          let successCount = 0;
-          let failCount = 0;
-          
-          for (const [cli, result] of results) {
-            if (result.success) {
-              successCount++;
-              printSuccess(`  ${cli}: ${result.skipped ? 'Kept' : 'Installed'} ${skill.name}`);
-              if (result.path) {
-                printInfo(`    Location: ${result.path}`);
-              }
-            } else {
-              failCount++;
-              printError(`  ${cli}: Failed - ${result.error}`);
+          // Install to selected agent only (original behavior)
+          const result = await installSkill(skill.name, { force: true, cli: selectedAgent as CliType, cwd });
+          if (result.success) {
+            printSuccess(`  ${alreadyInstalled ? 'Updated' : 'Installed'}: ${skill.name}`);
+            if (result.path) {
+              printInfo(`    Location: ${result.path}`);
             }
-          }
-          
-          if (successCount > 0 && failCount === 0) {
-            printSuccess(`  ${skill.name} installed for ${successCount} CLI(s)`);
+          } else {
+            printError(`  Failed to ${actionLabel.toLowerCase()} ${skill.name}: ${result.error}`);
           }
         } else if (alreadyInstalled) {
-          printInfo(`  ${skill.name}: Keeping existing versions`);
+          printInfo(`  ${skill.name}: Keeping existing version`);
         }
       }
-    } else if (bundledSkills.length === 0) {
-      printInfo('No bundled skills available for installation.');
+
+      // Optional: Install to other detected CLIs
+      if (otherDetectedClis.length > 0) {
+        console.log();
+        const installToOthers = await promptBoolean(
+          `Also install skills for other detected CLIs (${otherDetectedClis.join(', ')})?`,
+          {
+            default: false,
+            help: 'Install the same skills to other AI agents you have installed.',
+          }
+        );
+
+        if (installToOthers) {
+          for (const skill of bundledSkills) {
+            const results = await installSkillToAllClis(skill.name, otherDetectedClis, { force: true, cwd });
+            for (const [cli, result] of results) {
+              if (result.success) {
+                printSuccess(`  ${cli}: Installed ${skill.name}`);
+              } else {
+                printError(`  ${cli}: Failed - ${result.error}`);
+              }
+            }
+          }
+        }
+      }
     } else {
-      printInfo('No CLIs detected for skill installation.');
+      printInfo('No bundled skills available for installation.');
     }
 
     // === Save Configuration ===
