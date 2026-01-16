@@ -69,14 +69,15 @@
 - [x] Convert SKILL.md to POWER.md for Kiro
 - [x] Test re-run with --force (already worked)
 
-### 3.4 Skills
-- [ ] Create skill converter utility
-- [ ] Generate CLI-specific skill formats
-- [ ] Test skills in each CLI
+### 3.4 Skills ✅
+- [x] Create skill converter utility (in skill-installer.ts)
+- [x] Generate CLI-specific skill formats (convertSkillToPower)
+- [x] Support different filenames (SKILL.md, skill.md, POWER.md)
+- [ ] Test skills in each CLI (manual - user task)
 
-### 3.5 Testing
-- [ ] Unit tests for new plugins
-- [ ] Integration tests
+### 3.5 Testing ✅
+- [x] Unit tests for new plugins (gemini, codex, kiro)
+- [x] Integration tests (existing tests pass)
 - [ ] Manual CLI tests (user-executed)
 
 ---

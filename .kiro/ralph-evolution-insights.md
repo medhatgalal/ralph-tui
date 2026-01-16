@@ -146,10 +146,16 @@ Based on ralph-tui docs review, our multi-CLI support must maintain:
 |-----|------|-------------|----------|----------------|
 | Claude | Skills | `SKILL.md` | `~/.claude/skills/<name>/` | Manual |
 | Gemini | Skills | `SKILL.md` | `~/.gemini/skills/<name>/` or `.gemini/skills/<name>/` | `gemini skills install` |
-| Codex | Skills | `skill.md` | `~/.codex/skills/<name>/` | Manual |
-| Kiro | Powers | `POWER.md` + `mcp.json` + `steering/` | `.kiro/<name>/` or via IDE | IDE panel, GitHub URL, or local path |
+| Codex | Skills | `skill.md` (lowercase) | `~/.codex/skills/<name>/` | Manual |
+| Kiro | Powers | `POWER.md` + `mcp.json` + `steering/` | `.kiro/<name>/` (project-level) | IDE panel, GitHub URL, or local path |
 
 **Key Insight:** All four CLIs now have similar skill systems with YAML frontmatter + Markdown format. Gemini and Kiro have more sophisticated install/management commands.
+
+**Implementation Note:** ralph-tui skill-installer now supports all 4 CLIs:
+- `getSkillsDir(cli, cwd)` - Returns appropriate directory for each CLI
+- `getSkillFilename(cli)` - Returns SKILL.md, skill.md, or POWER.md
+- `installSkillToAllClis()` - Installs to all detected CLIs
+- `convertSkillToPower()` - Converts SKILL.md format to Kiro POWER.md (adds keywords)
 
 ---
 
