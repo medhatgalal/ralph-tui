@@ -1,0 +1,9 @@
+{
+  "typescript": {
+    "enabled": true,
+    "command": "typescript-language-server",
+    "args": ["--stdio"],
+    "rootPatterns": ["package.json", "tsconfig.json"],
+    "fileTypes": ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+  }
+}
