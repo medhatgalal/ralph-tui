@@ -37,6 +37,7 @@ import type { TrackerPluginMeta } from '../../plugins/trackers/types.js';
 import { getIterationLogsByTask } from '../../logs/index.js';
 import type { SubagentTraceStats, SubagentHierarchyNode } from '../../logs/types.js';
 import { StreamingOutputParser } from '../output-parser.js';
+import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
 
 /**
  * View modes for the RunApp component
@@ -324,6 +325,7 @@ export function RunApp({
     return info.maxIterations;
   });
   const [currentOutput, setCurrentOutput] = useState('');
+  const [currentSegments, setCurrentSegments] = useState<FormattedSegment[]>([]);
   // Streaming parser for live output - extracts readable content and prevents memory bloat
   // Use agentPlugin prop (from resolved config with CLI override) with fallback to storedConfig
   const resolvedAgentName = agentPlugin || storedConfig?.defaultAgent || storedConfig?.agent || 'claude';
@@ -493,6 +495,7 @@ export function RunApp({
         case 'iteration:started':
           setCurrentIteration(event.iteration);
           setCurrentOutput('');
+          setCurrentSegments([]);
           // Reset the streaming parser for the new iteration
           outputParserRef.current.reset();
           // Clear subagent state for new iteration
@@ -590,6 +593,8 @@ export function RunApp({
             // Use streaming parser to extract readable content (filters out verbose JSONL)
             outputParserRef.current.push(event.data);
             setCurrentOutput(outputParserRef.current.getOutput());
+            // Also update segments for TUI-native color rendering
+            setCurrentSegments(outputParserRef.current.getSegments());
           }
           // Refresh subagent tree from engine (subagent events are processed in engine)
           // Only refresh if subagent tracing is enabled to avoid unnecessary work
@@ -980,7 +985,7 @@ export function RunApp({
   const selectedTask = displayedTasks[selectedIndex] ?? null;
 
   // Compute the iteration output and timing to show for the selected task
-  // - If selected task is currently executing: show live currentOutput with isRunning
+  // - If selected task is currently executing: show live currentOutput with isRunning + segments
   // - If selected task has a completed iteration: show that iteration's output with timing
   // - Otherwise: undefined (will show "waiting" or appropriate message)
   const selectedTaskIteration = useMemo(() => {
@@ -992,9 +997,9 @@ export function RunApp({
           startedAt: currentIterationStartedAt,
           isRunning: true,
         };
-        return { iteration: currentIteration, output: currentOutput, timing };
+        return { iteration: currentIteration, output: currentOutput, segments: currentSegments, timing };
       }
-      return { iteration: currentIteration, output: undefined, timing: undefined };
+      return { iteration: currentIteration, output: undefined, segments: undefined, timing: undefined };
     }
 
     // Check if this task is currently being executed
@@ -1006,7 +1011,7 @@ export function RunApp({
         startedAt: currentIterationStartedAt,
         isRunning: true,
       };
-      return { iteration: currentIteration, output: currentOutput, timing };
+      return { iteration: currentIteration, output: currentOutput, segments: currentSegments, timing };
     }
 
     // Look for a completed iteration for this task (in-memory from current session)
@@ -1021,6 +1026,7 @@ export function RunApp({
       return {
         iteration: taskIteration.iteration,
         output: taskIteration.agentResult?.stdout ?? '',
+        segments: undefined, // Completed iterations don't have live segments
         timing,
       };
     }
@@ -1031,13 +1037,14 @@ export function RunApp({
       return {
         iteration: -1, // Historical iteration number unknown, use -1 to indicate "past"
         output: historicalData.output,
+        segments: undefined, // Historical data doesn't have segments
         timing: historicalData.timing,
       };
     }
 
     // Task hasn't been run yet (or historical log not yet loaded)
-    return { iteration: 0, output: undefined, timing: undefined };
-  }, [selectedTask, currentTaskId, currentIteration, currentOutput, iterations, historicalOutputCache]);
+    return { iteration: 0, output: undefined, segments: undefined, timing: undefined };
+  }, [selectedTask, currentTaskId, currentIteration, currentOutput, currentSegments, iterations, historicalOutputCache]);
 
   // Load historical iteration logs from disk when a completed task is selected
   useEffect(() => {
@@ -1225,6 +1232,7 @@ export function RunApp({
               selectedTask={selectedTask}
               currentIteration={selectedTaskIteration.iteration}
               iterationOutput={selectedTaskIteration.output}
+              iterationSegments={selectedTaskIteration.segments}
               viewMode={detailsViewMode}
               iterationTiming={selectedTaskIteration.timing}
               agentName={displayAgentName}
@@ -1258,6 +1266,7 @@ export function RunApp({
               selectedTask={selectedTask}
               currentIteration={selectedTaskIteration.iteration}
               iterationOutput={selectedTaskIteration.output}
+              iterationSegments={selectedTaskIteration.segments}
               viewMode={detailsViewMode}
               iterationTiming={selectedTaskIteration.timing}
               agentName={displayAgentName}

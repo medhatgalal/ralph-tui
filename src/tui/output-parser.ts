@@ -9,9 +9,11 @@ import {
   DroidCostAccumulator,
   formatDroidCostSummary,
   formatDroidEventForDisplay,
+  formatDroidEventToSegments,
   parseDroidJsonlLine,
   type DroidJsonlMessage,
 } from '../plugins/agents/droid/outputParser.js';
+import type { FormattedSegment } from '../plugins/agents/output-formatting.js';
 
 /**
  * Known JSONL event types from agent output.
@@ -224,6 +226,7 @@ export interface StreamingOutputParserOptions {
 export class StreamingOutputParser {
   private buffer = '';
   private parsedOutput = '';
+  private parsedSegments: FormattedSegment[] = [];
   private lastResultText = '';
   private lastCostSummary = '';
   private isDroid: boolean;
@@ -256,6 +259,7 @@ export class StreamingOutputParser {
   push(chunk: string): string {
     this.buffer += chunk;
     let newContent = '';
+    const newSegments: FormattedSegment[] = [];
 
     // Process complete lines
     let newlineIndex: number;
@@ -263,9 +267,16 @@ export class StreamingOutputParser {
       const line = this.buffer.slice(0, newlineIndex);
       this.buffer = this.buffer.slice(newlineIndex + 1);
 
+      // Extract both string and segment representations
       const extracted = this.extractReadableContent(line);
       if (extracted) {
         newContent += extracted + '\n';
+      }
+
+      const extractedSegments = this.extractReadableSegments(line);
+      if (extractedSegments.length > 0) {
+        newSegments.push(...extractedSegments);
+        newSegments.push({ text: '\n' }); // Add newline segment
       }
     }
 
@@ -277,6 +288,31 @@ export class StreamingOutputParser {
       if (this.parsedOutput.length > MAX_PARSED_OUTPUT_SIZE) {
         const trimPoint = this.parsedOutput.length - MAX_PARSED_OUTPUT_SIZE + 1000;
         this.parsedOutput = '[...output trimmed...]\n' + this.parsedOutput.slice(trimPoint);
+      }
+    }
+
+    // Append new segments
+    if (newSegments.length > 0) {
+      this.parsedSegments.push(...newSegments);
+
+      // Trim segments if total text exceeds max size
+      const totalLength = this.parsedSegments.reduce((acc, s) => acc + s.text.length, 0);
+      if (totalLength > MAX_PARSED_OUTPUT_SIZE) {
+        // Simple trim: keep last N segments that fit within limit
+        let kept = 0;
+        let keptLength = 0;
+        for (let i = this.parsedSegments.length - 1; i >= 0; i--) {
+          const segLen = this.parsedSegments[i]!.text.length;
+          if (keptLength + segLen > MAX_PARSED_OUTPUT_SIZE - 1000) {
+            break;
+          }
+          keptLength += segLen;
+          kept++;
+        }
+        this.parsedSegments = [
+          { text: '[...output trimmed...]\n', color: 'muted' },
+          ...this.parsedSegments.slice(-kept),
+        ];
       }
     }
 
@@ -375,6 +411,73 @@ export class StreamingOutputParser {
     }
   }
 
+  /**
+   * Extract readable content as FormattedSegments for TUI-native color rendering.
+   * Mirrors extractReadableContent but returns segments instead of strings.
+   */
+  private extractReadableSegments(line: string): FormattedSegment[] {
+    const trimmed = line.trim();
+    if (!trimmed) return [];
+
+    if (this.isDroid) {
+      const droidResult = parseDroidJsonlLine(trimmed);
+      if (droidResult.success) {
+        // Cost accumulation is already handled in extractReadableContent
+
+        const segments = formatDroidEventToSegments(droidResult.message);
+        if (segments.length > 0) {
+          return segments;
+        }
+        // Droid event was recognized but nothing to display
+        return [];
+      }
+    }
+
+    // Not JSON - return as plain text segment if it's not just whitespace
+    if (!trimmed.startsWith('{')) {
+      return [{ text: trimmed }];
+    }
+
+    try {
+      const event = JSON.parse(trimmed) as AgentEvent;
+
+      // Result event - skip (same as string version)
+      if (event.type === 'result') {
+        return [];
+      }
+
+      // Assistant message with content - show the text as plain segment
+      if (event.type === 'assistant') {
+        const assistantEvent = event as AssistantEvent;
+        const content = assistantEvent.message?.content;
+        if (typeof content === 'string' && content.trim()) {
+          return [{ text: content }];
+        }
+        if (Array.isArray(content)) {
+          const textParts = content
+            .filter((c): c is { type: string; text: string } => c.type === 'text' && !!c.text)
+            .map((c) => c.text);
+          if (textParts.length > 0) {
+            return [{ text: textParts.join('') }];
+          }
+        }
+      }
+
+      // User, system messages - skip
+      if (event.type === 'user' || event.type === 'system') {
+        return [];
+      }
+
+      return [];
+    } catch {
+      // Not valid JSON - return as plain text if meaningful
+      if (trimmed.length > 0 && !trimmed.startsWith('{')) {
+        return [{ text: trimmed }];
+      }
+      return [];
+    }
+  }
+
   private formatDroidCostSummaryIfFinal(message: DroidJsonlMessage): string | undefined {
     if (!this.droidCostAccumulator || !this.droidCostAccumulator.hasData()) {
       return undefined;
@@ -413,6 +516,14 @@ export class StreamingOutputParser {
   }
 
   /**
+   * Get the accumulated parsed segments for TUI-native color rendering.
+   * Use this with the FormattedText component for colored output.
+   */
+  getSegments(): FormattedSegment[] {
+    return this.parsedSegments;
+  }
+
+  /**
    * Get the final result text (from the 'result' event).
    * This is typically the most complete output at the end.
    */
@@ -426,6 +537,7 @@ export class StreamingOutputParser {
   reset(): void {
     this.buffer = '';
     this.parsedOutput = '';
+    this.parsedSegments = [];
     this.lastResultText = '';
     this.lastCostSummary = '';
     if (this.droidCostAccumulator) {

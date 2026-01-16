@@ -4,7 +4,12 @@
  */
 
 import type { ClaudeJsonlMessage } from '../builtin/claude.js';
-import { processAgentEvents, type AgentDisplayEvent } from '../output-formatting.js';
+import {
+  processAgentEvents,
+  processAgentEventsToSegments,
+  type AgentDisplayEvent,
+  type FormattedSegment,
+} from '../output-formatting.js';
 
 export interface DroidToolCall {
   id?: string;
@@ -539,6 +544,18 @@ export function formatDroidEventForDisplay(message: DroidJsonlMessage): string |
   }
   const result = processAgentEvents(events);
   return result.length > 0 ? result : undefined;
+}
+
+/**
+ * Format a DroidJsonlMessage to TUI-native segments for color rendering.
+ * Returns FormattedSegment[] for use with FormattedText component.
+ */
+export function formatDroidEventToSegments(message: DroidJsonlMessage): FormattedSegment[] {
+  const events = parseDroidMessageToEvents(message);
+  if (events.length === 0) {
+    return [];
+  }
+  return processAgentEventsToSegments(events);
 }
 
 // Strip ANSI escape sequences from a string

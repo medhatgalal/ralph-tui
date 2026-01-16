@@ -10,9 +10,11 @@ import { useMemo, useState, useEffect } from 'react';
 import { colors, getTaskStatusColor, getTaskStatusIndicator } from '../theme.js';
 import type { RightPanelProps, DetailsViewMode, IterationTimingInfo, SubagentTreeNode, TaskPriority } from '../types.js';
 import type { SubagentDetailLevel } from '../../config/types.js';
+import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
 import { formatElapsedTime } from '../theme.js';
 import { SubagentSections } from './SubagentSection.js';
 import { parseAgentOutput } from '../output-parser.js';
+import { FormattedText } from './FormattedText.js';
 
 /**
  * Priority label mapping for display
@@ -528,6 +530,7 @@ function TaskOutputView({
   task,
   currentIteration,
   iterationOutput,
+  iterationSegments,
   iterationTiming,
   agentName,
   currentModel,
@@ -540,6 +543,7 @@ function TaskOutputView({
   task: NonNullable<RightPanelProps['selectedTask']>;
   currentIteration: number;
   iterationOutput?: string;
+  iterationSegments?: FormattedSegment[];
   iterationTiming?: IterationTimingInfo;
   agentName?: string;
   currentModel?: string;
@@ -553,20 +557,23 @@ function TaskOutputView({
   const statusIndicator = getTaskStatusIndicator(task.status);
   const hasSubagents = subagentTree.length > 0 && subagentDetailLevel !== 'off';
 
-  // Parse the output to extract readable content from JSONL
-  // - Historical output (currentIteration === -1): always parse
-  // - Live output during execution (isRunning): show raw for streaming updates
-  // - Completed iterations in current session: parse to clean up final output
+  // Check if we're live streaming
+  const isLiveStreaming = iterationTiming?.isRunning === true;
+
+  // For live streaming, prefer segments for TUI-native colors
+  // For historical/completed output, parse the string to extract readable content
   const displayOutput = useMemo(() => {
     if (!iterationOutput) return undefined;
-    // For live output during execution, show raw for streaming updates
-    const isLiveStreaming = iterationTiming?.isRunning === true;
+    // For live output during execution, show raw for streaming updates (fallback if no segments)
     if (isLiveStreaming) {
       return iterationOutput;
     }
     // For completed output (historical or from current session), parse to extract readable content
     return parseAgentOutput(iterationOutput, agentName);
-  }, [iterationOutput, iterationTiming?.isRunning, agentName]);
+  }, [iterationOutput, isLiveStreaming, agentName]);
+
+  // Use segments during live streaming for colored output
+  const displaySegments = isLiveStreaming ? iterationSegments : undefined;
 
   // Parse model info for display
   const modelDisplay = currentModel
@@ -641,7 +648,10 @@ function TaskOutputView({
         }}
       >
         <scrollbox style={{ flexGrow: 1, padding: 1 }}>
-          {displayOutput !== undefined && displayOutput.length > 0 ? (
+          {/* Prefer segments for TUI-native colors during live streaming */}
+          {displaySegments && displaySegments.length > 0 ? (
+            <FormattedText segments={displaySegments} />
+          ) : displayOutput !== undefined && displayOutput.length > 0 ? (
             <text fg={colors.fg.secondary}>{displayOutput}</text>
           ) : displayOutput === '' ? (
             <text fg={colors.fg.muted}>No output captured</text>
@@ -663,6 +673,7 @@ function TaskDetails({
   task,
   currentIteration,
   iterationOutput,
+  iterationSegments,
   viewMode = 'details',
   iterationTiming,
   agentName,
@@ -676,6 +687,7 @@ function TaskDetails({
   task: NonNullable<RightPanelProps['selectedTask']>;
   currentIteration: number;
   iterationOutput?: string;
+  iterationSegments?: FormattedSegment[];
   viewMode?: DetailsViewMode;
   iterationTiming?: IterationTimingInfo;
   agentName?: string;
@@ -692,6 +704,7 @@ function TaskDetails({
         task={task}
         currentIteration={currentIteration}
         iterationOutput={iterationOutput}
+        iterationSegments={iterationSegments}
         iterationTiming={iterationTiming}
         agentName={agentName}
         currentModel={currentModel}
@@ -714,6 +727,7 @@ export function RightPanel({
   selectedTask,
   currentIteration,
   iterationOutput,
+  iterationSegments,
   viewMode = 'details',
   iterationTiming,
   agentName,
@@ -747,6 +761,7 @@ export function RightPanel({
           task={selectedTask}
           currentIteration={currentIteration}
           iterationOutput={iterationOutput}
+          iterationSegments={iterationSegments}
           viewMode={viewMode}
           iterationTiming={iterationTiming}
           agentName={agentName}
