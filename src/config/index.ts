@@ -82,8 +82,11 @@ async function loadConfigFile(configPath: string): Promise<LoadConfigResult> {
 
     const parsed = parseToml(content);
 
+    // Normalize config before validation
+    const normalized = normalizeConfig(parsed as Record<string, unknown>);
+
     // Validate with Zod
-    const result: ConfigParseResult = validateStoredConfig(parsed);
+    const result: ConfigParseResult = validateStoredConfig(normalized);
     if (!result.success) {
       const errorMsg = formatConfigErrors(result.errors ?? [], configPath);
       return { config: {}, exists: true, errors: errorMsg };
@@ -94,6 +97,44 @@ async function loadConfigFile(configPath: string): Promise<LoadConfigResult> {
     // File doesn't exist or can't be read
     return { config: {}, exists: false };
   }
+}
+
+/**
+ * Normalize config to handle both array and map formats for agents.
+ * Also handles snake_case to camelCase conversion.
+ */
+function normalizeConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...config };
+
+  // Handle snake_case default_agent
+  if (normalized.default_agent !== undefined && normalized.defaultAgent === undefined) {
+    normalized.defaultAgent = normalized.default_agent;
+    delete normalized.default_agent;
+  }
+
+  // Convert map-style agents to array-style
+  if (normalized.agents && typeof normalized.agents === 'object' && !Array.isArray(normalized.agents)) {
+    const agentsMap = normalized.agents as Record<string, Record<string, unknown>>;
+    normalized.agents = Object.entries(agentsMap).map(([name, agentConfig]) => {
+      // Handle snake_case fields
+      const defaultFlags = agentConfig.default_flags ?? agentConfig.defaultFlags;
+      const fallbackAgents = agentConfig.fallback_agents ?? agentConfig.fallbackAgents;
+
+      return {
+        name,
+        plugin: agentConfig.plugin,
+        default: agentConfig.default,
+        command: agentConfig.command,
+        defaultFlags,
+        timeout: agentConfig.timeout,
+        options: agentConfig.options ?? {},
+        fallbackAgents,
+        rateLimitHandling: agentConfig.rateLimitHandling,
+      };
+    });
+  }
+
+  return normalized;
 }
 
 /**

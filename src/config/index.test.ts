@@ -544,6 +544,88 @@ describe('Config merging - scalar overrides', () => {
   });
 });
 
+describe('Config normalization - map-style agents', () => {
+  let tempDir: string;
+  let globalConfigPath: string;
+
+  beforeEach(async () => {
+    tempDir = await createTempDir();
+    globalConfigPath = join(tempDir, 'global-config.toml');
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  test('normalizes map-style agents to array format', async () => {
+    // Write raw TOML with map-style agents (not using writeTomlConfig which uses stringify)
+    const tomlContent = `
+default_agent = "gemini"
+
+[agents.claude]
+plugin = "claude"
+default_flags = ["--dangerously-skip-permissions"]
+
+[agents.gemini]
+plugin = "gemini"
+default_flags = ["--yolo"]
+`;
+    await writeFile(globalConfigPath, tomlContent, 'utf-8');
+
+    const config = await loadStoredConfig(tempDir, globalConfigPath);
+    
+    // Should normalize default_agent to defaultAgent
+    expect(config.defaultAgent).toBe('gemini');
+    
+    // Should convert map to array
+    expect(Array.isArray(config.agents)).toBe(true);
+    expect(config.agents).toHaveLength(2);
+    
+    // Find claude and gemini configs
+    const claudeConfig = config.agents?.find(a => a.name === 'claude');
+    const geminiConfig = config.agents?.find(a => a.name === 'gemini');
+    
+    expect(claudeConfig).toBeDefined();
+    expect(claudeConfig?.plugin).toBe('claude');
+    expect(claudeConfig?.defaultFlags).toEqual(['--dangerously-skip-permissions']);
+    
+    expect(geminiConfig).toBeDefined();
+    expect(geminiConfig?.plugin).toBe('gemini');
+    expect(geminiConfig?.defaultFlags).toEqual(['--yolo']);
+  });
+
+  test('handles snake_case default_flags in map-style config', async () => {
+    const tomlContent = `
+[agents.kiro]
+plugin = "kiro"
+default_flags = ["--trust-all-tools"]
+fallback_agents = ["claude", "gemini"]
+`;
+    await writeFile(globalConfigPath, tomlContent, 'utf-8');
+
+    const config = await loadStoredConfig(tempDir, globalConfigPath);
+    
+    const kiroConfig = config.agents?.find(a => a.name === 'kiro');
+    expect(kiroConfig).toBeDefined();
+    expect(kiroConfig?.defaultFlags).toEqual(['--trust-all-tools']);
+    expect(kiroConfig?.fallbackAgents).toEqual(['claude', 'gemini']);
+  });
+
+  test('preserves array-style agents config', async () => {
+    await writeTomlConfig(globalConfigPath, {
+      agents: [
+        { name: 'claude', plugin: 'claude', defaultFlags: ['--dangerously-skip-permissions'], options: {} },
+      ],
+    });
+
+    const config = await loadStoredConfig(tempDir, globalConfigPath);
+    
+    expect(Array.isArray(config.agents)).toBe(true);
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents?.[0]?.name).toBe('claude');
+  });
+});
+
 describe('validateConfig', () => {
   test('validates valid configuration', async () => {
     const config: RalphConfig = {

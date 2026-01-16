@@ -56,7 +56,7 @@ export const NotificationsConfigSchema = z.object({
 });
 
 /**
- * Agent plugin configuration schema
+ * Agent plugin configuration schema (for array format)
  */
 export const AgentPluginConfigSchema = z.object({
   name: z.string().min(1, 'Agent name is required'),
@@ -69,6 +69,31 @@ export const AgentPluginConfigSchema = z.object({
   fallbackAgents: z.array(z.string().min(1)).optional(),
   rateLimitHandling: RateLimitHandlingConfigSchema.optional(),
 });
+
+/**
+ * Agent plugin configuration schema for map format (TOML table style)
+ * Used when config has [agents.claude] instead of [[agents]]
+ */
+export const AgentPluginConfigMapEntrySchema = z.object({
+  plugin: z.string().min(1, 'Agent plugin type is required'),
+  default: z.boolean().optional(),
+  command: z.string().optional(),
+  default_flags: z.array(z.string()).optional(),
+  defaultFlags: z.array(z.string()).optional(),
+  timeout: z.number().int().min(0).optional(),
+  options: AgentOptionsSchema.optional(),
+  fallback_agents: z.array(z.string().min(1)).optional(),
+  fallbackAgents: z.array(z.string().min(1)).optional(),
+  rateLimitHandling: RateLimitHandlingConfigSchema.optional(),
+});
+
+/**
+ * Agents config can be either array format or map format
+ */
+export const AgentsConfigSchema = z.union([
+  z.array(AgentPluginConfigSchema),
+  z.record(z.string(), AgentPluginConfigMapEntrySchema),
+]);
 
 /**
  * Tracker plugin options schema (flexible for plugin-specific settings)
@@ -102,9 +127,12 @@ export const StoredConfigSchema = z
     outputDir: z.string().optional(),
     autoCommit: z.boolean().optional(),
 
-    // Plugin configurations
-    agents: z.array(AgentPluginConfigSchema).optional(),
+    // Plugin configurations (supports both array and map formats)
+    agents: AgentsConfigSchema.optional(),
     trackers: z.array(TrackerPluginConfigSchema).optional(),
+
+    // Support snake_case from TOML
+    default_agent: z.string().optional(),
 
     // Agent-specific options (shorthand for common settings)
     agent: z.string().optional(),

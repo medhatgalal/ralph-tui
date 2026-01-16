@@ -54,17 +54,20 @@
 - [x] Create `src/plugins/agents/builtin/codex.ts` plugin
 - [x] Update agent registry (via builtin/index.ts)
 
-### 3.2 Configuration
-- [ ] Add new agent configs to schema
-- [ ] Add `default_flags` per agent
-- [ ] Add `default_agent` setting
-- [ ] Update config validation
+### 3.2 Configuration ✅
+- [x] Add new agent configs to schema (map-style support)
+- [x] Add `default_flags` per agent (already existed)
+- [x] Add `default_agent` setting (already existed)
+- [x] Update config validation and types
+- [x] Add snake_case normalization
+- [x] Add tests for map-style config
 
-### 3.3 Setup Wizard
-- [ ] Add detection for new CLIs
-- [ ] Add skill installation for new CLIs
-- [ ] Add default agent selection prompt
-- [ ] Test re-run with --force
+### 3.3 Setup Wizard ✅
+- [x] Add detection for new CLIs (already worked via registry)
+- [x] Add skill installation for new CLIs
+- [x] Add multi-CLI skills directory support
+- [x] Convert SKILL.md to POWER.md for Kiro
+- [x] Test re-run with --force (already worked)
 
 ### 3.4 Skills
 - [ ] Create skill converter utility
