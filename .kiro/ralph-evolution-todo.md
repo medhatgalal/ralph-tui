@@ -82,10 +82,10 @@
 
 ---
 
-## Phase 4: Documentation & PR
+## Phase 4: Documentation & PR 🔄 IN PROGRESS
 
-- [ ] Update README.md
-- [ ] Update CONTRIBUTING.md
+- [x] Update README.md
+- [ ] Update CONTRIBUTING.md (if needed)
 - [ ] Create PR to upstream
 - [ ] Address review feedback
 
