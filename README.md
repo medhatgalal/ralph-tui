@@ -8,7 +8,7 @@
 
 **AI Agent Loop Orchestrator** - A terminal UI for orchestrating AI coding agents to work through task lists autonomously.
 
-Ralph TUI connects your AI coding assistant (Claude Code, OpenCode, Factory Droid) to your task tracker and runs them in an autonomous loop, completing tasks one-by-one with intelligent selection, error handling, and full visibility.
+Ralph TUI connects your AI coding assistant (Claude Code, Gemini CLI, Codex, Kiro CLI, OpenCode, Factory Droid) to your task tracker and runs them in an autonomous loop, completing tasks one-by-one with intelligent selection, error handling, and full visibility.
 
 ![Ralph TUI Screenshot](docs/images/ralph-tui.png)
 
@@ -67,7 +67,7 @@ Ralph selects the highest-priority task, builds a prompt, executes your AI agent
 ## Features
 
 - **Task Trackers**: prd.json (simple), Beads (git-backed with dependencies)
-- **AI Agents**: Claude Code, OpenCode
+- **AI Agents**: Claude Code, Gemini CLI, Codex, Kiro CLI, OpenCode, Factory Droid
 - **Session Persistence**: Pause anytime, resume later, survive crashes
 - **Real-time TUI**: Watch agent output, control execution with keyboard shortcuts
 - **Subagent Tracing**: See nested agent calls in real-time
@@ -102,7 +102,9 @@ ralph-tui run --epic my-epic-id
 
 # Override agent or model
 ralph-tui run --agent claude --model sonnet
-ralph-tui run --agent opencode --model anthropic/claude-3-5-sonnet
+ralph-tui run --agent gemini --model gemini-2.5-pro
+ralph-tui run --agent codex --model gpt-4o
+ralph-tui run --agent kiro
 
 # Limit iterations
 ralph-tui run --iterations 5
@@ -144,7 +146,12 @@ See the [full CLI reference](https://ralph-tui.com/docs/cli/overview) for all op
 
 ### Using Skills Directly in Your Agent
 
-After running `ralph-tui setup`, skills are installed to `~/.claude/skills/` and can be used directly in Claude Code:
+After running `ralph-tui setup`, skills are installed to each detected CLI's skills directory:
+
+- **Claude Code**: `~/.claude/skills/`
+- **Gemini CLI**: `~/.gemini/skills/`
+- **Codex**: `~/.codex/skills/`
+- **Kiro CLI**: `.kiro/` (project-level)
 
 ```bash
 # In Claude Code, use these slash commands:
