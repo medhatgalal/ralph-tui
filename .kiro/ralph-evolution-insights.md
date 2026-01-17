@@ -395,3 +395,23 @@ This breaks for users who don't have Claude installed.
 2. If no agents detected, fail with helpful error listing supported agents
 3. When multiple CLIs detected, offer menu: "selected only" / "all" / "skip"
 4. When single CLI detected, use simple yes/no per skill (original UX)
+
+
+### Upstream Merge (2026-01-16)
+
+**Merged upstream/main into feature/port-ralphtui-ai**
+
+Upstream additions:
+- Sandbox support for agent execution (`src/sandbox/`)
+- Clipboard utilities (`src/utils/clipboard.ts`)
+- Output formatting improvements
+- Bug fixes and test improvements
+- 1057 tests now pass (up from 873)
+
+Our additions preserved:
+- Gemini, Codex, Kiro agent plugins
+- Multi-CLI skill installation
+- Config map-style support
+- Setup wizard improvements
+
+No conflicts during merge.
