@@ -216,12 +216,19 @@ codex exec --full-auto --json "<prompt>"
 **Multi-CLI Detection:**
 ```
 Detecting available AI agents...
-  ✓ Claude Code (claude) - v1.2.3
   ✓ Gemini CLI (gemini) - v2.0.1
   ✓ Kiro CLI (kiro-cli) - v1.5.0
-  ✓ Codex (codex) - v0.9.0
 
-Select default agent: [claude/gemini/kiro/codex]
+Detected 2 agent(s): Gemini CLI, Kiro CLI
+
+Select default agent: [gemini/kiro]
+```
+
+Note: Only AVAILABLE agents are shown. If no agents are detected, setup fails with:
+```
+No AI coding agents detected on your system.
+Ralph TUI supports: Claude Code, Gemini CLI, Codex, Kiro CLI, OpenCode, Factory Droid
+Please install at least one supported agent and try again.
 ```
 
 **Per-Agent Setup:**
@@ -678,14 +685,19 @@ bun install -g ralph-tui
 
 ### 10.1 Skills Installation Strategy
 
-**Default behavior (unchanged from original):**
-- Install skills for the SELECTED agent only
-- This preserves backward compatibility
+**Agent Selection (updated):**
+- Only AVAILABLE (detected) agents are shown in the selection menu
+- If no agents are detected, setup fails with helpful error message
+- User cannot select an unavailable agent
 
-**Optional: Install to all detected CLIs:**
-- User can choose to install skills to all detected CLIs during setup
-- Prompt: "Also install skills for other detected CLIs?"
-- Only offered if multiple CLIs are detected
+**Skills Installation Options:**
+When multiple CLIs are detected, user chooses from:
+1. **Selected agent only** (default) - Install skills for the chosen agent
+2. **All detected CLIs** - Install skills for all available agents
+3. **Skip** - Don't install skills (can be done later)
+
+When only one CLI is detected:
+- Simple yes/no prompt per skill (original behavior)
 
 **Skills per CLI:**
 

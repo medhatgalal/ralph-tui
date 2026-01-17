@@ -381,6 +381,17 @@ All three CLIs support non-interactive execution:
 
 This means:
 1. Add support for new CLIs (additive)
-2. Don't change how existing Claude users experience the tool
-3. New features should be opt-in, not opt-out
+2. Don't assume Claude is installed - show only available agents
+3. Give users clear choices when multiple CLIs are detected
 4. Reserve breaking changes for Theme 2 (EngOS integration)
+
+### Agent Selection Behavior (Final)
+
+**Problem:** Original code showed ALL registered agents (even unavailable ones) and defaulted to Claude.
+This breaks for users who don't have Claude installed.
+
+**Solution:**
+1. Only show AVAILABLE (detected) agents in selection menu
+2. If no agents detected, fail with helpful error listing supported agents
+3. When multiple CLIs detected, offer menu: "selected only" / "all" / "skip"
+4. When single CLI detected, use simple yes/no per skill (original UX)
