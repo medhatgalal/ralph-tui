@@ -3,16 +3,17 @@
 **Project:** Extend ralph-tui with multi-CLI support + EngOS integration
 **Philosophy:** Rich Hickey's "Simple Made Easy" - decomplect, favor simplicity, data over abstractions
 **Started:** 2026-01-16
-**Status:** Theme 1 Implementation Complete, Ready for Phase 4 (Documentation & PR)
+**Status:** Theme 1 Complete - Ready for Testing & PR
 
 ---
 
 ## Goals
 
-### Theme 1: Multi-CLI Support (CURRENT FOCUS)
+### Theme 1: Multi-CLI Support ✅ COMPLETE
 Extend ralph-tui to support Gemini CLI, Kiro CLI, and Codex CLI alongside existing Claude Code support.
 
 **Spec Location:** `.kiro/specs/theme1-multi-cli-support.md`
+**Install Docs:** `docs/INSTALL-FORK.md`
 
 ### Theme 2: EngOS Skill (DEFERRED)
 Build a self-evolving, self-evaluating AI skill integrated with ralph-tui.

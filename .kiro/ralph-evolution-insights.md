@@ -408,10 +408,55 @@ Upstream additions:
 - Bug fixes and test improvements
 - 1057 tests now pass (up from 873)
 
-Our additions preserved:
-- Gemini, Codex, Kiro agent plugins
-- Multi-CLI skill installation
-- Config map-style support
-- Setup wizard improvements
+Our additions preserved (verified):
+- `src/plugins/agents/builtin/gemini.ts` ✅
+- `src/plugins/agents/builtin/codex.ts` ✅
+- `src/plugins/agents/builtin/kiro.ts` ✅
+- `src/plugins/agents/builtin/index.ts` (registers all 6 agents) ✅
+- `src/config/schema.ts` (map-style config) ✅
+- `src/config/index.ts` (normalizeConfig) ✅
+- `src/setup/skill-installer.ts` (multi-CLI) ✅
+- `src/setup/wizard.ts` (available agents, menu) ✅
 
 No conflicts during merge.
+
+---
+
+## Final Implementation Summary
+
+### Files Created
+| File | Purpose |
+|------|---------|
+| `src/plugins/agents/builtin/gemini.ts` | Gemini CLI agent |
+| `src/plugins/agents/builtin/codex.ts` | Codex CLI agent |
+| `src/plugins/agents/builtin/kiro.ts` | Kiro CLI agent |
+| `tests/plugins/gemini-agent.test.ts` | 17 tests |
+| `tests/plugins/codex-agent.test.ts` | 17 tests |
+| `tests/plugins/kiro-agent.test.ts` | 14 tests |
+| `scripts/test-multi-cli.sh` | Manual test script |
+| `scripts/test-prd.json` | Test PRD |
+| `docs/INSTALL-FORK.md` | Installation instructions |
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `src/plugins/agents/builtin/index.ts` | Register 3 new agents |
+| `src/config/schema.ts` | Map-style agents config |
+| `src/config/index.ts` | normalizeConfig function |
+| `src/setup/skill-installer.ts` | Multi-CLI support |
+| `src/setup/wizard.ts` | Available agents only, skills menu |
+| `README.md` | List all 6 agents |
+| `CONTRIBUTING.md` | List all agents |
+
+### Installation
+```bash
+bun install -g github:medhatgalal/ralph-tui#feature/port-ralphtui-ai
+```
+
+### Usage
+```bash
+ralph-tui setup                              # Detects available CLIs
+ralph-tui run --agent gemini --prd ./prd.json
+ralph-tui run --agent kiro --prd ./prd.json
+ralph-tui run --agent codex --prd ./prd.json
+```
