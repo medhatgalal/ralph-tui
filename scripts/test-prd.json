@@ -1,0 +1,13 @@
+{
+  "name": "Multi-CLI Test PRD",
+  "description": "Simple test PRD for verifying multi-CLI support",
+  "tasks": [
+    {
+      "id": "test-1",
+      "title": "Echo test",
+      "description": "Simply echo 'Ralph TUI multi-CLI test successful' to verify the agent is working.",
+      "status": "open",
+      "priority": "high"
+    }
+  ]
+}
