@@ -87,8 +87,8 @@ export class KiroAgentPlugin extends BaseAgentPlugin {
     command: string
   ): Promise<{ success: boolean; version?: string; error?: string }> {
     return new Promise((resolve) => {
-      // Kiro uses 'version' subcommand, not --version
-      const proc = spawn(command, ['version'], {
+      // Use -V flag (the documented version flag for kiro-cli)
+      const proc = spawn(command, ['-V'], {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: true,
       });
