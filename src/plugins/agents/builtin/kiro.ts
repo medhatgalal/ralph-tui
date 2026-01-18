@@ -76,6 +76,9 @@ export class KiroAgentPlugin extends BaseAgentPlugin {
       };
     }
 
+    // Store the detected path for use in execute()
+    this.commandPath = findResult.path;
+
     return {
       available: true,
       version: versionResult.version,
