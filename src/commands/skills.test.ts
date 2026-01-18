@@ -1,6 +1,7 @@
 /**
  * ABOUTME: Tests for the skills command CLI interface.
- * Tests the list and install subcommands for managing Claude Code skills.
+ * Tests the list and install subcommands for managing agent skills.
+ * Supports multi-agent skill installation (Claude Code, OpenCode, Factory Droid).
  */
 
 import { describe, expect, test, beforeEach, afterEach, spyOn, mock } from 'bun:test';
@@ -39,6 +40,7 @@ describe('printSkillsHelp', () => {
     const output = consoleSpy.mock.calls[0][0];
     expect(output).toContain('--force');
     expect(output).toContain('--all');
+    expect(output).toContain('--agent');
   });
 
   test('includes examples in help', () => {
@@ -47,6 +49,16 @@ describe('printSkillsHelp', () => {
     const output = consoleSpy.mock.calls[0][0];
     expect(output).toContain('ralph-tui skills list');
     expect(output).toContain('ralph-tui skills install');
+    expect(output).toContain('--agent claude');
+  });
+
+  test('includes supported agents in help', () => {
+    printSkillsHelp();
+
+    const output = consoleSpy.mock.calls[0][0];
+    expect(output).toContain('claude');
+    expect(output).toContain('opencode');
+    expect(output).toContain('droid');
   });
 });
 
@@ -129,22 +141,27 @@ describe('skills list command', () => {
     expect(allOutput).toContain('Bundled Skills');
   });
 
-  test('shows installation status', async () => {
+  test('shows installation status by agent', async () => {
     await executeSkillsCommand(['list']);
 
     const allOutput = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
 
-    // Should show installed or not installed status
-    expect(allOutput.includes('installed') || allOutput.includes('not installed')).toBe(true);
+    // Should show "Installation Status by Agent" section
+    expect(allOutput).toContain('Installation Status by Agent');
   });
 
-  test('shows install location', async () => {
+  test('shows agent names and paths', async () => {
     await executeSkillsCommand(['list']);
 
     const allOutput = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
 
-    // Should show install location
-    expect(allOutput).toContain('.claude/skills');
+    // Should show at least one agent's skill path
+    // The paths vary by agent: .claude/skills, .opencode/skill, .factory/skills
+    expect(
+      allOutput.includes('.claude/skills') ||
+      allOutput.includes('.opencode/skill') ||
+      allOutput.includes('.factory/skills')
+    ).toBe(true);
   });
 });
 
@@ -162,7 +179,7 @@ describe('skills install command', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  test('installs all skills by default', async () => {
+  test('installs all skills to detected agents by default', async () => {
     const skills = await listBundledSkills();
     if (skills.length === 0) {
       console.log('Skipping: No bundled skills found');
@@ -173,8 +190,9 @@ describe('skills install command', () => {
 
     const allOutput = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
 
-    // Should show "Installing all bundled skills"
-    expect(allOutput).toContain('Installing all bundled skills');
+    // Should show "Installing all skills to N agent(s)"
+    expect(allOutput).toContain('Installing all skills');
+    expect(allOutput).toContain('agent');
   });
 
   test('installs specific skill by name', async () => {
@@ -248,7 +266,7 @@ describe('skills install command', () => {
     const allOutput = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
 
     // Should show installation output
-    expect(allOutput).toContain('Installing all bundled skills');
+    expect(allOutput).toContain('Installing all skills');
   });
 
   test('accepts --all flag explicitly', async () => {
@@ -263,7 +281,62 @@ describe('skills install command', () => {
     const allOutput = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
 
     // Should show installing all
-    expect(allOutput).toContain('Installing all bundled skills');
+    expect(allOutput).toContain('Installing all skills');
+  });
+
+  test('accepts --agent flag to install to specific agent', async () => {
+    const skills = await listBundledSkills();
+    if (skills.length === 0) {
+      console.log('Skipping: No bundled skills found');
+      return;
+    }
+
+    await executeSkillsCommand(['install', '--agent', 'claude', '--force']);
+
+    const allOutput = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
+
+    // Should show installing to specific agent
+    expect(allOutput).toContain('claude');
+    expect(allOutput).toContain('Claude Code');
+  });
+
+  test('accepts --agent=value form', async () => {
+    const skills = await listBundledSkills();
+    if (skills.length === 0) {
+      console.log('Skipping: No bundled skills found');
+      return;
+    }
+
+    await executeSkillsCommand(['install', '--agent=opencode', '--force']);
+
+    const allOutput = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
+
+    // Should show installing to OpenCode
+    expect(allOutput).toContain('OpenCode');
+  });
+
+  test('shows error for unknown agent', async () => {
+    const skills = await listBundledSkills();
+    if (skills.length === 0) {
+      console.log('Skipping: No bundled skills found');
+      return;
+    }
+
+    // Mock process.exit to prevent test from exiting
+    const exitSpy = spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+
+    try {
+      await executeSkillsCommand(['install', '--agent', 'nonexistent-agent']);
+    } catch {
+      // Expected - process.exit throws
+    }
+
+    const errorOutput = consoleErrorSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
+    expect(errorOutput).toContain('Unknown agent');
+
+    exitSpy.mockRestore();
   });
 
   test('shows summary after installation', async () => {
