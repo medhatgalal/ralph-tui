@@ -311,6 +311,13 @@ describe('expandTilde', () => {
     expect(result).toBe(join(homedir(), '.claude/skills'));
   });
 
+  test('expands ~\\ paths to home directory (Windows-style)', () => {
+    const result = expandTilde('~\\.claude\\skills');
+    // join normalizes separators, so we check the result contains the home dir
+    expect(result.startsWith(homedir())).toBe(true);
+    expect(result).toContain('.claude');
+  });
+
   test('returns non-tilde paths unchanged', () => {
     const result = expandTilde('/absolute/path');
     expect(result).toBe('/absolute/path');
@@ -351,6 +358,32 @@ describe('resolveSkillsPath', () => {
   test('returns absolute paths unchanged even with cwd', () => {
     const result = resolveSkillsPath('/absolute/path', '/some/cwd');
     expect(result).toBe('/absolute/path');
+  });
+
+  test('handles Windows drive letter paths as absolute', () => {
+    // On all platforms, path.isAbsolute recognizes Windows paths
+    // Note: This tests the code path, actual behavior may vary by platform
+    const result = resolveSkillsPath('C:\\Users\\test\\skills');
+    // Should not prepend cwd if isAbsolute returns true
+    // On Linux, isAbsolute('C:\\...') returns false, so it will be joined
+    // This test documents current cross-platform behavior
+    if (process.platform === 'win32') {
+      expect(result).toBe('C:\\Users\\test\\skills');
+    } else {
+      // On POSIX, Windows paths are treated as relative
+      expect(result).toContain('C:');
+    }
+  });
+
+  test('handles Windows UNC paths', () => {
+    // UNC paths like \\server\share are absolute on Windows
+    const result = resolveSkillsPath('\\\\server\\share\\skills');
+    if (process.platform === 'win32') {
+      expect(result).toBe('\\\\server\\share\\skills');
+    } else {
+      // On POSIX, UNC paths are treated as relative
+      expect(result).toContain('server');
+    }
   });
 });
 

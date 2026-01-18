@@ -197,14 +197,17 @@ export async function migrateConfig(
       );
 
       const skillPath = resolveSkillsPath(meta.skillsPaths.personal);
-      for (const [skillName, skillResult] of agentResult.skills) {
-        if (skillResult.success && !skillResult.skipped) {
-          result.skillsUpdated.push(`${meta.id}:${skillName}`);
-          log(`     ✓ ${skillName}`);
-        } else if (skillResult.skipped) {
-          log(`     · ${skillName} (already installed)`);
-        } else if (skillResult.error) {
-          result.warnings.push(`Failed to install ${skillName} for ${meta.name}: ${skillResult.error}`);
+      for (const [skillName, targetResults] of agentResult.skills) {
+        // Migration only installs to personal, so we check the first (and only) target result
+        for (const { result: skillResult } of targetResults) {
+          if (skillResult.success && !skillResult.skipped) {
+            result.skillsUpdated.push(`${meta.id}:${skillName}`);
+            log(`     ✓ ${skillName}`);
+          } else if (skillResult.skipped) {
+            log(`     · ${skillName} (already installed)`);
+          } else if (skillResult.error) {
+            result.warnings.push(`Failed to install ${skillName} for ${meta.name}: ${skillResult.error}`);
+          }
         }
       }
       log(`     → ${skillPath}`);

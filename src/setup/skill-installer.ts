@@ -6,7 +6,7 @@
  */
 
 import { readFile, writeFile, mkdir, access, constants, readdir } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { join, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { AgentSkillsPaths } from '../plugins/agents/types.js';
@@ -43,6 +43,17 @@ export interface SkillInfo {
 }
 
 /**
+ * Result of installing a skill to a specific target (personal or repo).
+ */
+export interface SkillTargetResult {
+  /** Target type ('personal' or 'repo') */
+  target: 'personal' | 'repo';
+
+  /** The installation result */
+  result: SkillInstallResult;
+}
+
+/**
  * Result of installing skills for a specific agent.
  */
 export interface AgentSkillInstallResult {
@@ -52,8 +63,8 @@ export interface AgentSkillInstallResult {
   /** Agent display name */
   agentName: string;
 
-  /** Results for each skill installed */
-  skills: Map<string, SkillInstallResult>;
+  /** Results for each skill installed, with per-target results */
+  skills: Map<string, SkillTargetResult[]>;
 
   /** Whether any skills were successfully installed */
   hasInstalls: boolean;
@@ -64,9 +75,11 @@ export interface AgentSkillInstallResult {
 
 /**
  * Expand ~ in paths to the user's home directory.
+ * Supports both POSIX (~/) and Windows (~\) style paths.
  */
 export function expandTilde(path: string): string {
-  if (path.startsWith('~/')) {
+  // Handle ~/ (POSIX) and ~\ (Windows)
+  if (path.startsWith('~/') || path.startsWith('~\\')) {
     return join(homedir(), path.slice(2));
   }
   if (path === '~') {
@@ -78,17 +91,18 @@ export function expandTilde(path: string): string {
 /**
  * Resolve the absolute path for a skills directory.
  * Handles ~ expansion and can resolve repo-relative paths.
+ * Supports both POSIX and Windows absolute paths (including drive letters and UNC paths).
  *
  * @param skillsPath - Path from AgentSkillsPaths (personal or repo)
  * @param cwd - Current working directory for repo-relative paths
  */
 export function resolveSkillsPath(skillsPath: string, cwd?: string): string {
-  // Expand ~ for personal paths
+  // Expand ~ for personal paths (handles both ~/ and ~\)
   if (skillsPath.startsWith('~')) {
     return expandTilde(skillsPath);
   }
-  // Already absolute paths are returned as-is
-  if (skillsPath.startsWith('/')) {
+  // Already absolute paths are returned as-is (POSIX, Windows drive letters, UNC paths)
+  if (isAbsolute(skillsPath)) {
     return skillsPath;
   }
   // Repo-relative paths need a working directory
@@ -350,15 +364,15 @@ export async function installSkillsForAgent(
   } = {}
 ): Promise<AgentSkillInstallResult> {
   const { force = false, personal = true, repo = false, cwd, skillName } = options;
-  const allResults = new Map<string, SkillInstallResult>();
+  const allResults = new Map<string, SkillTargetResult[]>();
 
-  // Determine which directories to install to
-  const targetDirs: string[] = [];
+  // Build list of targets with their resolved paths and labels
+  const targets: Array<{ label: 'personal' | 'repo'; dir: string }> = [];
   if (personal) {
-    targetDirs.push(resolveSkillsPath(skillsPaths.personal));
+    targets.push({ label: 'personal', dir: resolveSkillsPath(skillsPaths.personal) });
   }
   if (repo) {
-    targetDirs.push(resolveSkillsPath(skillsPaths.repo, cwd));
+    targets.push({ label: 'repo', dir: resolveSkillsPath(skillsPaths.repo, cwd) });
   }
 
   // Get skills to install
@@ -367,26 +381,28 @@ export async function installSkillsForAgent(
     ? bundledSkills.filter(s => s.name === skillName)
     : bundledSkills;
 
-  // Install to each target directory
-  for (const targetDir of targetDirs) {
-    for (const skill of skillsToInstall) {
-      const result = await installSkillTo(skill.name, targetDir, { force });
-      // Use the skill name as key, but if installing to multiple dirs,
-      // later results will override (personal then repo order)
-      allResults.set(skill.name, result);
+  // Install to each target directory, preserving per-target results
+  for (const skill of skillsToInstall) {
+    const skillResults: SkillTargetResult[] = [];
+    for (const target of targets) {
+      const result = await installSkillTo(skill.name, target.dir, { force });
+      skillResults.push({ target: target.label, result });
     }
+    allResults.set(skill.name, skillResults);
   }
 
-  // Compute summary flags
+  // Compute summary flags by checking all target results
   let hasInstalls = false;
   let allSkipped = true;
 
-  for (const result of allResults.values()) {
-    if (result.success && !result.skipped) {
-      hasInstalls = true;
-      allSkipped = false;
-    } else if (!result.success) {
-      allSkipped = false;
+  for (const targetResults of allResults.values()) {
+    for (const { result } of targetResults) {
+      if (result.success && !result.skipped) {
+        hasInstalls = true;
+        allSkipped = false;
+      } else if (!result.success) {
+        allSkipped = false;
+      }
     }
   }
 

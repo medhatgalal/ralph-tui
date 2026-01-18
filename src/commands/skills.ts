@@ -318,18 +318,21 @@ async function handleInstallSkills(args: string[]): Promise<void> {
     );
 
     // Show results for each skill
-    for (const [name, skillResult] of result.skills) {
-      if (skillResult.success) {
-        if (skillResult.skipped) {
-          console.log(`  ${DIM}⊘${RESET} Skipped: ${name} ${DIM}(already exists)${RESET}`);
-          totalSkipped++;
+    for (const [name, targetResults] of result.skills) {
+      // Currently only installing to personal, so check each target result
+      for (const { result: skillResult } of targetResults) {
+        if (skillResult.success) {
+          if (skillResult.skipped) {
+            console.log(`  ${DIM}⊘${RESET} Skipped: ${name} ${DIM}(already exists)${RESET}`);
+            totalSkipped++;
+          } else {
+            console.log(`  ${GREEN}✓${RESET} Installed: ${CYAN}${name}${RESET}`);
+            totalInstalled++;
+          }
         } else {
-          console.log(`  ${GREEN}✓${RESET} Installed: ${CYAN}${name}${RESET}`);
-          totalInstalled++;
+          console.log(`  ${RED}✗${RESET} Failed: ${name} - ${skillResult.error}`);
+          totalFailed++;
         }
-      } else {
-        console.log(`  ${RED}✗${RESET} Failed: ${name} - ${skillResult.error}`);
-        totalFailed++;
       }
     }
     console.log();
