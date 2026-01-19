@@ -3,7 +3,16 @@
 **Project:** Extend ralph-tui with multi-CLI support + EngOS integration
 **Philosophy:** Rich Hickey's "Simple Made Easy" - decomplect, favor simplicity, data over abstractions
 **Started:** 2026-01-16
-**Status:** Theme 1 Complete - Ready for Testing & PR
+**Status:** Theme 1 Complete - v0.2.1 merged and installed
+
+---
+
+## Current Version
+
+**ralph-tui v0.2.1** with multi-CLI support:
+- 6 agents: claude, opencode, droid, gemini, codex, kiro
+- Multi-agent skill installation via skillsPaths
+- All fixes from upstream v0.2.0 and v0.2.1
 
 ---
 
@@ -21,17 +30,13 @@ Uses EngOS for Humans v4.4 guide: `temp/EngOS_Guide_for_Humans_v4.4.md`
 
 ---
 
-## Key Decisions (FINALIZED)
+## Key Fixes Applied
 
-| Decision | Choice | Notes |
-|----------|--------|-------|
-| Approval mode | **Hybrid** | Unified `approval` setting + `default_flags` override |
-| Kiro tracing | **Activity indicator** | Spinner + elapsed time + safe activity capture (no fragile parsing) |
-| Skills scope | **All detected CLIs** | Install for each CLI found during setup |
-| Default agent | **Config + fallback** | User selects at setup, Kiro as fallback default |
-| Skills format | **Single source + converter** | One canonical skill, generate CLI-specific formats |
-| Steering files | **AGENTS.md unified** | All CLIs read AGENTS.md, CLI-specific files import it |
-| Config changes | **Edit TOML or re-run setup --force** | No new command needed |
+| Fix | Description |
+|-----|-------------|
+| kiro-cli -V | Use `-V` flag (instant) instead of `version` subcommand |
+| PATH resolution | All agents store full path from detect() for execute() |
+| skillsPaths | Added to gemini, codex, kiro for v0.2.1 multi-agent skills |
 
 ---
 
