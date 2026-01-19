@@ -33,6 +33,10 @@ export class KiroAgentPlugin extends BaseAgentPlugin {
     supportsFileContext: false,
     supportsSubagentTracing: false, // Text output only, no structured tracing
     structuredOutputFormat: undefined,
+    skillsPaths: {
+      personal: '~/.kiro/skills',
+      repo: '.kiro',
+    },
   };
 
   private trustAllTools = true;

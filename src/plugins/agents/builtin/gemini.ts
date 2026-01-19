@@ -32,6 +32,10 @@ export class GeminiAgentPlugin extends BaseAgentPlugin {
     supportsFileContext: false,
     supportsSubagentTracing: true,
     structuredOutputFormat: 'jsonl',
+    skillsPaths: {
+      personal: '~/.gemini/skills',
+      repo: '.gemini/skills',
+    },
   };
 
   private model?: string;

@@ -126,7 +126,11 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
     supportsStreaming: true,
     supportsInterrupt: true,
     supportsFileContext: true,
-    supportsSubagentTracing: false,
+    supportsSubagentTracing: true,
+    skillsPaths: {
+      personal: '~/.opencode/skill',
+      repo: '.opencode/skill',
+    },
   };
 
   /** AI provider (any string, validated by OpenCode CLI) */
@@ -366,6 +370,7 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
   /**
    * Override execute to parse opencode JSON output.
    * Wraps the onStdout/onStdoutSegments callbacks to parse JSONL events and extract displayable content.
+   * Also forwards raw JSONL messages to onJsonlMessage for subagent tracing.
    */
   override execute(
     prompt: string,
@@ -375,8 +380,24 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
     // Wrap callbacks to parse JSON events
     const parsedOptions: AgentExecuteOptions = {
       ...options,
-      onStdout: (options?.onStdout || options?.onStdoutSegments)
+      onStdout: (options?.onStdout || options?.onStdoutSegments || options?.onJsonlMessage)
         ? (data: string) => {
+            // Parse raw JSONL lines and forward to onJsonlMessage for subagent tracing
+            if (options?.onJsonlMessage) {
+              for (const line of data.split('\n')) {
+                const trimmed = line.trim();
+                if (trimmed && trimmed.startsWith('{')) {
+                  try {
+                    const parsed = JSON.parse(trimmed);
+                    options.onJsonlMessage(parsed);
+                  } catch {
+                    // Not valid JSON, skip
+                  }
+                }
+              }
+            }
+
+            // Process for display events
             const events = parseOpenCodeOutputToEvents(data);
             if (events.length > 0) {
               // Call TUI-native segments callback if provided

@@ -32,6 +32,10 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
     supportsFileContext: false,
     supportsSubagentTracing: true,
     structuredOutputFormat: 'jsonl',
+    skillsPaths: {
+      personal: '~/.codex/skills',
+      repo: '.codex/skills',
+    },
   };
 
   private model?: string;

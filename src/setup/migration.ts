@@ -2,10 +2,10 @@
  * ABOUTME: Config migration utility for ralph-tui.
  * Handles automatic upgrades when users update to new versions.
  * Ensures skills and templates are updated while preserving user customizations.
+ * Supports multi-agent skill installation (Claude Code, OpenCode, Factory Droid).
  */
 
-import { access, constants, readFile, writeFile, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { access, constants } from 'node:fs/promises';
 
 import {
   loadProjectConfigOnly,
@@ -13,14 +13,23 @@ import {
   getProjectConfigPath,
 } from '../config/index.js';
 import type { StoredConfig } from '../config/types.js';
-import { listBundledSkills, installSkill } from './skill-installer.js';
-import { getBuiltinTemplate } from '../templates/engine.js';
+import {
+  installSkillsForAgent,
+  resolveSkillsPath,
+} from './skill-installer.js';
+import { installBuiltinTemplates } from '../templates/engine.js';
+import { getAgentRegistry } from '../plugins/agents/registry.js';
+import { registerBuiltinAgents } from '../plugins/agents/builtin/index.js';
 
 /**
  * Current config version. Bump this when making breaking changes
  * that require migration.
+ *
+ * Version history:
+ * - 2.0: Initial versioned config (skills in ~/.claude/skills/)
+ * - 2.1: Multi-agent skill installation (skills for all detected agents)
  */
-export const CURRENT_CONFIG_VERSION = '2.0';
+export const CURRENT_CONFIG_VERSION = '2.1';
 
 /**
  * Result of a migration attempt.
@@ -143,32 +152,71 @@ export async function migrateConfig(
     log('');
     log('📦 Upgrading ralph-tui configuration...');
 
-    // 1. Install/update bundled skills
-    log('   Installing bundled skills...');
-    const skills = await listBundledSkills();
+    // 1. Install/update bundled skills for all detected agents
+    log('   Installing bundled skills for detected agents...');
 
-    for (const skill of skills) {
-      const installResult = await installSkill(skill.name, {
-        force: options.forceSkills ?? true, // Default to updating skills
-      });
+    // Register built-in agents and get those with skill support
+    registerBuiltinAgents();
+    const registry = getAgentRegistry();
+    const plugins = registry.getRegisteredPlugins();
 
-      if (installResult.success && !installResult.skipped) {
-        result.skillsUpdated.push(skill.name);
-        log(`   ✓ Installed skill: ${skill.name}`);
-      } else if (installResult.skipped) {
-        log(`   · Skill already installed: ${skill.name}`);
-      } else if (installResult.error) {
-        result.warnings.push(`Failed to install skill ${skill.name}: ${installResult.error}`);
+    // Get agents that support skills and are available
+    for (const meta of plugins) {
+      if (!meta.skillsPaths) continue;
+
+      // Check if agent is installed
+      const instance = registry.createInstance(meta.id);
+      if (!instance) continue;
+
+      let available = false;
+      try {
+        const detectResult = await instance.detect();
+        available = detectResult.available;
+      } catch {
+        available = false;
+      } finally {
+        await instance.dispose();
       }
+
+      if (!available) {
+        log(`   · Skipping ${meta.name} (not installed)`);
+        continue;
+      }
+
+      // Install skills for this agent
+      log(`   Installing skills for ${meta.name}...`);
+      const agentResult = await installSkillsForAgent(
+        meta.id,
+        meta.name,
+        meta.skillsPaths,
+        {
+          force: options.forceSkills ?? true,
+          personal: true,
+          repo: false,
+        }
+      );
+
+      const skillPath = resolveSkillsPath(meta.skillsPaths.personal);
+      for (const [skillName, targetResults] of agentResult.skills) {
+        // Migration only installs to personal, so we check the first (and only) target result
+        for (const { result: skillResult } of targetResults) {
+          if (skillResult.success && !skillResult.skipped) {
+            result.skillsUpdated.push(`${meta.id}:${skillName}`);
+            log(`     ✓ ${skillName}`);
+          } else if (skillResult.skipped) {
+            log(`     · ${skillName} (already installed)`);
+          } else if (skillResult.error) {
+            result.warnings.push(`Failed to install ${skillName} for ${meta.name}: ${skillResult.error}`);
+          }
+        }
+      }
+      log(`     → ${skillPath}`);
     }
 
-    // 2. Check for template updates
-    // We only update templates if the user hasn't customized them
-    const templateUpdated = await updateTemplateIfNotCustomized(cwd, options.quiet);
+    // 2. Install builtin templates to global config directory
+    // Templates are only installed if they don't already exist (preserves customizations)
+    const templateUpdated = installGlobalTemplatesIfMissing(options.quiet);
     result.templatesUpdated = templateUpdated;
-    if (templateUpdated) {
-      log('   ✓ Updated prompt template');
-    }
 
     // 3. Update config version
     const configPath = getProjectConfigPath(cwd);
@@ -212,55 +260,45 @@ export async function migrateConfig(
 }
 
 /**
- * Update the prompt template if the user hasn't customized it.
- * - If template is missing → write new default template
- * - If template exists and matches current default → no update needed
- * - If template exists but differs → preserve user customization
+ * Install builtin templates to the global config directory (~/.config/ralph-tui/templates/).
+ * Templates are only written if they don't already exist (preserves user customizations).
+ * Project-level templates (.ralph-tui/templates/) take precedence over global templates.
  *
- * @param cwd Working directory
  * @param quiet Suppress output
- * @returns true if template was updated
+ * @returns true if any templates were installed
  */
-async function updateTemplateIfNotCustomized(
-  cwd: string,
-  quiet?: boolean
-): Promise<boolean> {
+function installGlobalTemplatesIfMissing(quiet?: boolean): boolean {
   const log = quiet ? () => {} : console.log.bind(console);
 
   try {
-    const templateDir = join(cwd, '.ralph-tui');
-    const templatePath = join(templateDir, 'prompt.hbs');
-    const defaultTemplate = getBuiltinTemplate('default');
+    // Install builtin templates to global location (skip existing)
+    const result = installBuiltinTemplates(false);
 
-    // Check if template already exists
-    let existingTemplate: string | null = null;
-    try {
-      existingTemplate = await readFile(templatePath, 'utf-8');
-    } catch {
-      // Template doesn't exist
-    }
-
-    if (existingTemplate === null) {
-      // No template exists - write the default template
-      await mkdir(templateDir, { recursive: true });
-      await writeFile(templatePath, defaultTemplate, 'utf-8');
-      return true;
-    }
-
-    // Template exists - check if it matches current default
-    if (existingTemplate.trim() === defaultTemplate.trim()) {
-      // Already has the current default, no update needed
-      log('   · Prompt template is already current');
+    if (!result.success) {
+      const errors = result.results.filter((r) => r.error);
+      if (errors.length > 0) {
+        log(`   ⚠ Some templates failed to install: ${errors.map((e) => e.error).join(', ')}`);
+      }
       return false;
     }
 
-    // Template differs from default - user has customized it, preserve
-    log('   · Custom prompt template detected, preserving (run "ralph-tui template init --force" to update)');
+    const installed = result.results.filter((r) => r.created);
+    const skipped = result.results.filter((r) => r.skipped);
+
+    if (installed.length > 0) {
+      log(`   ✓ Installed ${installed.length} template(s) to ${result.templatesDir}`);
+      return true;
+    }
+
+    if (skipped.length > 0) {
+      log(`   · Templates already installed (${skipped.length} skipped)`);
+    }
+
     return false;
   } catch (error) {
     // Log error but don't fail migration
     if (!quiet) {
-      console.warn(`   ⚠ Could not update template: ${error instanceof Error ? error.message : error}`);
+      console.warn(`   ⚠ Could not install templates: ${error instanceof Error ? error.message : error}`);
     }
     return false;
   }

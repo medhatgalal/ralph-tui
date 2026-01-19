@@ -30,8 +30,8 @@ import {
 } from './prompts.js';
 import {
   listBundledSkills,
-  installSkill,
-  type CliType,
+  installSkillsForAgent,
+  isSkillInstalled,
 } from './skill-installer.js';
 import { CURRENT_CONFIG_VERSION } from './migration.js';
 
@@ -330,62 +330,110 @@ export async function runSetupWizard(
     printSection('AI Skills Installation');
 
     const bundledSkills = await listBundledSkills();
-    // Get list of detected CLI IDs for skill installation options
-    const detectedCliIds = availableAgents.map(p => p.id);
     
-    // Determine which CLIs to install skills for
-    let targetClis: string[] = [selectedAgent];
+    // Get agent registry for skill installation
+    const skillsAgentRegistry = getAgentRegistry();
     
-    if (bundledSkills.length > 0 && detectedCliIds.length > 1) {
-      // Multiple CLIs detected - ask user which to install skills for
+    // Get agents with skillsPaths defined
+    const agentsWithSkills = availableAgents.filter(p => {
+      const instance = skillsAgentRegistry.createInstance(p.id);
+      const hasSkills = instance?.meta.skillsPaths !== undefined;
+      instance?.dispose();
+      return hasSkills;
+    });
+    
+    // Determine which agents to install skills for
+    let targetAgentIds: string[] = [selectedAgent];
+    
+    if (bundledSkills.length > 0 && agentsWithSkills.length > 1) {
+      // Multiple agents with skills support - ask user which to install for
       printInfo('Ralph TUI includes AI skills that enhance agent capabilities.');
-      printInfo(`Detected CLIs: ${detectedCliIds.join(', ')}`);
+      printInfo(`Agents with skill support: ${agentsWithSkills.map(a => a.name).join(', ')}`);
       console.log();
       
       const skillInstallChoice = await promptSelect(
-        'Install skills for which CLI(s)?',
+        'Install skills for which agent(s)?',
         [
           { value: 'selected', label: `${selectedAgent} only`, description: 'Install skills for your selected agent' },
-          { value: 'all', label: 'All detected CLIs', description: `Install skills for: ${detectedCliIds.join(', ')}` },
-          { value: 'none', label: 'Skip skill installation', description: 'You can install skills later' },
+          { value: 'all', label: 'All detected agents', description: `Install skills for: ${agentsWithSkills.map(a => a.id).join(', ')}` },
+          { value: 'none', label: 'Skip skill installation', description: 'You can install skills later with: ralph-tui skill install' },
         ],
         {
           default: 'selected',
-          help: 'Skills enable using ralph-tui capabilities directly inside each CLI.',
+          help: 'Skills enable using ralph-tui capabilities directly inside each agent.',
         }
       );
       
       if (skillInstallChoice === 'all') {
-        targetClis = detectedCliIds;
+        targetAgentIds = agentsWithSkills.map(a => a.id);
       } else if (skillInstallChoice === 'none') {
-        targetClis = [];
+        targetAgentIds = [];
       }
     } else if (bundledSkills.length > 0) {
-      // Single CLI detected - just ask yes/no
+      // Single agent or no multi-agent choice needed
       printInfo('Ralph TUI includes AI skills that enhance agent capabilities.');
       console.log();
     }
 
-    // Install skills to target CLIs
-    if (targetClis.length > 0 && bundledSkills.length > 0) {
-      for (const skill of bundledSkills) {
-        const installThisSkill = detectedCliIds.length === 1 
-          ? await promptBoolean(`Install skill: ${skill.name}?`, { default: true, help: skill.description })
-          : true; // Already asked about CLI selection above
+    // Install skills to target agents using the new API
+    if (targetAgentIds.length > 0 && bundledSkills.length > 0) {
+      for (const agentId of targetAgentIds) {
+        const instance = skillsAgentRegistry.createInstance(agentId);
+        if (!instance?.meta.skillsPaths) continue;
         
-        if (installThisSkill) {
-          for (const cli of targetClis) {
-            const result = await installSkill(skill.name, { force: true, cli: cli as CliType, cwd });
-            if (result.success) {
-              printSuccess(`  ${cli}: Installed ${skill.name}`);
-              if (result.path) {
-                printInfo(`    Location: ${result.path}`);
+        const agentMeta = availableAgents.find(a => a.id === agentId);
+        const agentName = agentMeta?.name ?? agentId;
+        
+        // For single agent, ask per-skill; for multiple, install all
+        if (targetAgentIds.length === 1) {
+          for (const skill of bundledSkills) {
+            const alreadyInstalled = await isSkillInstalled(skill.name);
+            const actionLabel = alreadyInstalled ? 'Update' : 'Install';
+            
+            const installThisSkill = await promptBoolean(
+              `${actionLabel} skill: ${skill.name}?`,
+              { default: true, help: skill.description }
+            );
+            
+            if (installThisSkill) {
+              const result = await installSkillsForAgent(
+                agentId,
+                agentName,
+                instance.meta.skillsPaths,
+                { force: true, personal: true, cwd, skillName: skill.name }
+              );
+              
+              for (const [skillName, targetResults] of result.skills) {
+                for (const { target, result: installResult } of targetResults) {
+                  if (installResult.success) {
+                    printSuccess(`  ${agentName} (${target}): Installed ${skillName}`);
+                    if (installResult.path) {
+                      printInfo(`    Location: ${installResult.path}`);
+                    }
+                  } else {
+                    printError(`  ${agentName}: Failed - ${installResult.error}`);
+                  }
+                }
               }
-            } else {
-              printError(`  ${cli}: Failed - ${result.error}`);
             }
           }
+        } else {
+          // Multiple agents selected - install all skills
+          const result = await installSkillsForAgent(
+            agentId,
+            agentName,
+            instance.meta.skillsPaths,
+            { force: true, personal: true, cwd }
+          );
+          
+          if (result.hasInstalls) {
+            printSuccess(`  ${agentName}: Skills installed`);
+          } else if (result.allSkipped) {
+            printInfo(`  ${agentName}: Skills already up to date`);
+          }
         }
+        
+        await instance.dispose();
       }
     } else if (bundledSkills.length === 0) {
       printInfo('No bundled skills available for installation.');

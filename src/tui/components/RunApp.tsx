@@ -53,6 +53,13 @@ import type { FormattedSegment } from '../../plugins/agents/output-formatting.js
 type ViewMode = 'tasks' | 'iterations' | 'iteration-detail';
 
 /**
+ * Focused pane for TAB-based navigation between panels.
+ * - 'output': RightPanel output view has keyboard focus (j/k scroll output)
+ * - 'subagentTree': SubagentTreePanel has keyboard focus (j/k select nodes)
+ */
+type FocusedPane = 'output' | 'subagentTree';
+
+/**
  * Props for the RunApp component
  */
 export interface RunAppProps {
@@ -386,14 +393,13 @@ export function RunApp({
   const [promptPreview, setPromptPreview] = useState<string | undefined>(undefined);
   const [templateSource, setTemplateSource] = useState<string | undefined>(undefined);
   // Subagent tracing detail level - initialized from config, can be cycled with 't' key
+  // Default to 'moderate' to show inline subagent sections by default
   const [subagentDetailLevel, setSubagentDetailLevel] = useState<SubagentDetailLevel>(
-    () => storedConfig?.subagentTracingDetail ?? 'off'
+    () => storedConfig?.subagentTracingDetail ?? 'moderate'
   );
   // Subagent tree for the current iteration (from engine.getSubagentTree())
   const [subagentTree, setSubagentTree] = useState<SubagentTreeNode[]>([]);
-  // Set of collapsed subagent IDs (for collapsible sections in output view)
-  const [collapsedSubagents, setCollapsedSubagents] = useState<Set<string>>(() => new Set());
-  // Currently focused subagent ID for keyboard navigation (future enhancement)
+  // Currently focused subagent ID for keyboard navigation
   const [focusedSubagentId, setFocusedSubagentId] = useState<string | undefined>(undefined);
   // Subagent stats cache for iteration history view (keyed by iteration number)
   const [subagentStatsCache, setSubagentStatsCache] = useState<Map<number, SubagentTraceStats>>(
@@ -414,6 +420,19 @@ export function RunApp({
   // Subagent tree panel visibility state (toggled with 'T' key)
   // Tracks subagents even when panel is hidden (subagentTree state continues updating)
   const [subagentPanelVisible, setSubagentPanelVisible] = useState(initialSubagentPanelVisible);
+  // Track if user manually hid the panel (to respect user intent for auto-show logic)
+  // When true, auto-show will not override user's explicit hide action
+  const [userManuallyHidPanel, setUserManuallyHidPanel] = useState(false);
+
+  // Focused pane for TAB-based navigation between output and subagent tree
+  // - 'output': j/k scroll output content (default)
+  // - 'subagentTree': j/k select nodes in the tree
+  const [focusedPane, setFocusedPane] = useState<FocusedPane>('output');
+
+  // Selected node in subagent tree for keyboard navigation
+  // - currentTaskId (or 'main' if no task): Task root node is selected
+  // - string: Subagent ID is selected
+  const [selectedSubagentId, setSelectedSubagentId] = useState<string>('main');
 
   // Active agent state from engine - tracks which agent is running and why (primary/fallback)
   const [activeAgentState, setActiveAgentState] = useState<ActiveAgentState | null>(null);
@@ -422,6 +441,17 @@ export function RunApp({
 
   // Compute display agent name - prefer active agent from engine state, fallback to config
   const displayAgentName = activeAgentState?.plugin ?? agentName;
+
+  // Count running subagents for status indicator when panel is hidden
+  const runningSubagentCount = useMemo(() => {
+    const countRunning = (nodes: SubagentTreeNode[]): number => {
+      return nodes.reduce((sum, node) => {
+        const self = node.state.status === 'running' ? 1 : 0;
+        return sum + self + countRunning(node.children);
+      }, 0);
+    };
+    return countRunning(subagentTree);
+  }, [subagentTree]);
 
   // Filter and sort tasks for display
   // Sort order: active → actionable → blocked → done → closed
@@ -452,6 +482,16 @@ export function RunApp({
       setSelectedIndex(displayedTasks.length - 1);
     }
   }, [displayedTasks.length, selectedIndex]);
+
+  // Auto-show subagent panel when first subagent spawns (unless user manually hid it)
+  // This makes subagent activity discoverable without requiring users to know about 'T' key
+  useEffect(() => {
+    if (subagentTree.length > 0 && !subagentPanelVisible && !userManuallyHidPanel) {
+      setSubagentPanelVisible(true);
+      // Also persist the change to session state
+      onSubagentPanelVisibilityChange?.(true);
+    }
+  }, [subagentTree.length, subagentPanelVisible, userManuallyHidPanel, onSubagentPanelVisibilityChange]);
 
   // Regenerate prompt preview when selected task changes (if in prompt view mode)
   // This keeps the prompt preview in sync with the currently selected task/iteration
@@ -566,8 +606,10 @@ export function RunApp({
           outputParserRef.current.reset();
           // Clear subagent state for new iteration
           setSubagentTree([]);
-          setCollapsedSubagents(new Set());
           setFocusedSubagentId(undefined);
+          setSelectedSubagentId('main');
+          // Reset user manual hide state for new iteration - allows auto-show for new subagents
+          setUserManuallyHidPanel(false);
           // Set current task info for display
           setCurrentTaskId(event.task.id);
           setCurrentTaskTitle(event.task.title);
@@ -662,11 +704,10 @@ export function RunApp({
             // Also update segments for TUI-native color rendering
             setCurrentSegments(outputParserRef.current.getSegments());
           }
-          // Refresh subagent tree from engine (subagent events are processed in engine)
-          // Only refresh if subagent tracing is enabled to avoid unnecessary work
-          if (subagentDetailLevel !== 'off') {
-            setSubagentTree(engine.getSubagentTree());
-          }
+          // Always refresh subagent tree from engine (subagent events are processed in engine).
+          // This decouples data collection from display preferences - the subagentDetailLevel
+          // only affects how much detail to show inline, not whether to track subagents.
+          setSubagentTree(engine.getSubagentTree());
           break;
 
         case 'agent:switched':
@@ -718,7 +759,7 @@ export function RunApp({
     });
 
     return unsubscribe;
-  }, [engine, subagentDetailLevel]);
+  }, [engine]);
 
   // Update elapsed time every second - only while executing
   // Timer accumulates total execution time across all iterations
@@ -756,23 +797,40 @@ export function RunApp({
     }
   }, [engine, agentName]);
 
+  // Sync task selection → agent tree selection
+  // When currentTaskId changes, reset tree selection to the task root
+  useEffect(() => {
+    if (currentTaskId) {
+      setSelectedSubagentId(currentTaskId);
+    } else {
+      setSelectedSubagentId('main');
+    }
+  }, [currentTaskId]);
+
   // Calculate the number of items in iteration history (iterations + pending)
   const iterationHistoryLength = Math.max(iterations.length, totalIterations);
 
-  // Handler for toggling subagent section collapse state
-  const handleSubagentToggle = useCallback((id: string) => {
-    setCollapsedSubagents((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
+  // Navigate through subagent tree with j/k keys
+  // Builds a flattened list of all nodes (task root + subagents) and moves selection
+  const navigateSubagentTree = useCallback((direction: 1 | -1) => {
+    // Root node ID: currentTaskId if available, otherwise 'main' for backwards compat
+    const rootNodeId = currentTaskId || 'main';
+    // Build flat list: [rootNodeId, ...all subagent IDs in tree order]
+    const flatList: string[] = [rootNodeId];
+
+    function traverse(nodes: SubagentTreeNode[]) {
+      for (const node of nodes) {
+        flatList.push(node.state.id);
+        traverse(node.children);
       }
-      return next;
-    });
-    // Update focused subagent when toggling
-    setFocusedSubagentId(id);
-  }, []);
+    }
+    traverse(subagentTree);
+
+    // Find current index and move
+    const currentIdx = flatList.indexOf(selectedSubagentId);
+    const newIdx = Math.max(0, Math.min(flatList.length - 1, currentIdx + direction));
+    setSelectedSubagentId(flatList[newIdx]!);
+  }, [subagentTree, selectedSubagentId, currentTaskId]);
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -869,8 +927,22 @@ export function RunApp({
           }
           break;
 
+        case 'tab':
+          // Toggle focus between output and subagent tree panels
+          // Only works when subagent panel is visible and in output view mode
+          if (subagentPanelVisible && detailsViewMode === 'output') {
+            setFocusedPane((prev) => prev === 'output' ? 'subagentTree' : 'output');
+          }
+          break;
+
         case 'up':
         case 'k':
+          // Focus-aware navigation: when subagent panel is visible and focused, navigate tree
+          if (detailsViewMode === 'output' && subagentPanelVisible && focusedPane === 'subagentTree') {
+            navigateSubagentTree(-1);
+            break;
+          }
+          // Default: navigate task/iteration lists
           if (viewMode === 'tasks') {
             setSelectedIndex((prev) => Math.max(0, prev - 1));
           } else if (viewMode === 'iterations') {
@@ -880,6 +952,12 @@ export function RunApp({
 
         case 'down':
         case 'j':
+          // Focus-aware navigation: when subagent panel is visible and focused, navigate tree
+          if (detailsViewMode === 'output' && subagentPanelVisible && focusedPane === 'subagentTree') {
+            navigateSubagentTree(1);
+            break;
+          }
+          // Default: navigate task/iteration lists
           if (viewMode === 'tasks') {
             setSelectedIndex((prev) => Math.min(displayedTasks.length - 1, prev + 1));
           } else if (viewMode === 'iterations') {
@@ -1047,6 +1125,11 @@ export function RunApp({
             // The panel shows on the right side; subagent tracking continues even when hidden
             setSubagentPanelVisible((prev) => {
               const newVisible = !prev;
+              // If user is hiding the panel, mark it as manually hidden
+              // This prevents auto-show from overriding user intent
+              if (!newVisible) {
+                setUserManuallyHidPanel(true);
+              }
               // Persist the change to session state
               onSubagentPanelVisibilityChange?.(newVisible);
               return newVisible;
@@ -1085,7 +1168,7 @@ export function RunApp({
           break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showEpicLoader, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showEpicLoader, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree]
   );
 
   useKeyboard(handleKeyboard);
@@ -1187,6 +1270,109 @@ export function RunApp({
     // Task hasn't been run yet (or historical log not yet loaded)
     return { iteration: 0, output: undefined, segments: undefined, timing: undefined };
   }, [effectiveTaskId, selectedTask, selectedIteration, viewMode, currentTaskId, currentIteration, currentOutput, currentSegments, iterations, historicalOutputCache, currentIterationStartedAt]);
+
+  // Compute the actual output to display based on selectedSubagentId
+  // When a subagent is selected (not task root), try to get its specific output
+  // NOTE: Only use selectedSubagentId when viewing the current task - subagent tree
+  // only shows subagents for the currently executing task
+  const displayIterationOutput = useMemo(() => {
+    // Compute effective task ID - what task are we actually viewing?
+    // This avoids using potentially stale selectedTask?.id directly
+    const effectiveTaskId = viewMode === 'iterations'
+      ? selectedIteration?.task?.id
+      : selectedTask?.id;
+
+    // Check if we're viewing the currently executing task
+    const isViewingCurrentTask = effectiveTaskId === currentTaskId;
+
+    // Check if task root is selected (effectiveTaskId or 'main' for backwards compat)
+    const isTaskRootSelected = selectedSubagentId === effectiveTaskId || selectedSubagentId === 'main';
+
+    // If not viewing current task, or task root is selected, show the iteration output
+    if (!isViewingCurrentTask || isTaskRootSelected) {
+      return selectedTaskIteration.output;
+    }
+
+    // Helper to recursively find a subagent node by ID
+    function findSubagentNode(nodes: SubagentTreeNode[], id: string): SubagentTreeNode | undefined {
+      for (const node of nodes) {
+        if (node.state.id === id) return node;
+        const found = findSubagentNode(node.children, id);
+        if (found) return found;
+      }
+      return undefined;
+    }
+
+    // Find subagent state from tree
+    const subagentNode = findSubagentNode(subagentTree, selectedSubagentId);
+
+    // Try to get subagent-specific output from engine (returns tool result content)
+    const subagentOutput = engine.getSubagentOutput(selectedSubagentId);
+
+    // Build rich output based on subagent state
+    // We have: metadata, prompt, result, child subagents, timing
+    if (subagentNode) {
+      const { state } = subagentNode;
+      const details = engine.getSubagentDetails(selectedSubagentId);
+
+      // Build header
+      const lines: string[] = [];
+      lines.push(`═══ [${state.type}] ${state.description} ═══`);
+      lines.push('');
+
+      // Status and timing
+      const statusLine = `Status: ${state.status}`;
+      const durationLine = state.durationMs
+        ? `  |  Duration: ${state.durationMs < 1000 ? `${state.durationMs}ms` : `${Math.round(state.durationMs / 1000)}s`}`
+        : '';
+      lines.push(statusLine + durationLine);
+
+      // Timestamps
+      if (details) {
+        const startTime = new Date(details.spawnedAt).toLocaleTimeString();
+        const endTime = details.endedAt ? new Date(details.endedAt).toLocaleTimeString() : 'running';
+        lines.push(`Started: ${startTime}  |  Ended: ${endTime}`);
+      }
+
+      // Child subagents
+      if (state.children.length > 0) {
+        lines.push(`Child subagents: ${state.children.length}`);
+      }
+
+      lines.push('');
+
+      // Show the prompt/task given to the subagent
+      if (details?.prompt) {
+        lines.push('─── Task Given ───');
+        lines.push(details.prompt);
+        lines.push('');
+      }
+
+      // Show the result if available
+      if (subagentOutput && subagentOutput.trim().length > 0) {
+        lines.push('─── Result ───');
+        lines.push(subagentOutput);
+      } else if (state.status === 'running') {
+        lines.push('─── Status ───');
+        lines.push('Subagent is currently running...');
+      } else if (state.status === 'completed') {
+        lines.push('─── Result ───');
+        lines.push('(Subagent completed without returning detailed output)');
+      } else if (state.status === 'error') {
+        lines.push('─── Error ───');
+        lines.push('Subagent encountered an error');
+      }
+
+      return lines.join('\n');
+    }
+
+    // Subagent not found in tree
+    if (subagentOutput && subagentOutput.trim().length > 0) {
+      return `[Subagent]\n\n${subagentOutput}`;
+    }
+
+    return `[Subagent ${selectedSubagentId}]\nNo output available`;
+  }, [selectedSubagentId, currentTaskId, selectedTask?.id, selectedIteration?.task?.id, viewMode, selectedTaskIteration.output, engine, subagentTree]);
 
   // Compute historic agent/model for display when viewing completed iterations
   // Falls back to current values if viewing a live iteration or no historic data available
@@ -1434,21 +1620,20 @@ export function RunApp({
           />
         ) : viewMode === 'tasks' ? (
           <>
-            <LeftPanel tasks={displayedTasks} selectedIndex={selectedIndex} />
+            <LeftPanel
+              tasks={displayedTasks}
+              selectedIndex={selectedIndex}
+              isFocused={!subagentPanelVisible || focusedPane === 'output'}
+            />
             <RightPanel
               selectedTask={selectedTask}
               currentIteration={selectedTaskIteration.iteration}
-              iterationOutput={selectedTaskIteration.output}
+              iterationOutput={displayIterationOutput}
               iterationSegments={selectedTaskIteration.segments}
               viewMode={detailsViewMode}
               iterationTiming={selectedTaskIteration.timing}
               agentName={displayAgentInfo.agent}
               currentModel={displayAgentInfo.model}
-              subagentDetailLevel={subagentDetailLevel}
-              subagentTree={subagentTree}
-              collapsedSubagents={collapsedSubagents}
-              focusedSubagentId={focusedSubagentId}
-              onSubagentToggle={handleSubagentToggle}
               promptPreview={promptPreview}
               templateSource={templateSource}
             />
@@ -1458,6 +1643,12 @@ export function RunApp({
                 tree={subagentTree}
                 activeSubagentId={focusedSubagentId}
                 width={45}
+                currentTaskId={currentTaskId}
+                currentTaskTitle={currentTaskTitle}
+                currentTaskStatus={status === 'executing' ? 'running' : status === 'complete' ? 'completed' : status === 'error' ? 'error' : 'idle'}
+                selectedId={selectedSubagentId}
+                onSelect={setSelectedSubagentId}
+                isFocused={focusedPane === 'subagentTree'}
               />
             )}
           </>
@@ -1474,17 +1665,12 @@ export function RunApp({
             <RightPanel
               selectedTask={selectedTask}
               currentIteration={selectedTaskIteration.iteration}
-              iterationOutput={selectedTaskIteration.output}
+              iterationOutput={displayIterationOutput}
               iterationSegments={selectedTaskIteration.segments}
               viewMode={detailsViewMode}
               iterationTiming={selectedTaskIteration.timing}
               agentName={displayAgentInfo.agent}
               currentModel={displayAgentInfo.model}
-              subagentDetailLevel={subagentDetailLevel}
-              subagentTree={subagentTree}
-              collapsedSubagents={collapsedSubagents}
-              focusedSubagentId={focusedSubagentId}
-              onSubagentToggle={handleSubagentToggle}
               promptPreview={promptPreview}
               templateSource={templateSource}
             />
@@ -1494,6 +1680,12 @@ export function RunApp({
                 tree={subagentTree}
                 activeSubagentId={focusedSubagentId}
                 width={45}
+                currentTaskId={currentTaskId}
+                currentTaskTitle={currentTaskTitle}
+                currentTaskStatus={status === 'executing' ? 'running' : status === 'complete' ? 'completed' : status === 'error' ? 'error' : 'idle'}
+                selectedId={selectedSubagentId}
+                onSelect={setSelectedSubagentId}
+                isFocused={focusedPane === 'subagentTree'}
               />
             )}
           </>
@@ -1503,13 +1695,33 @@ export function RunApp({
       {/* Footer */}
       <Footer />
 
+      {/* Subagent activity indicator - shows when panel is hidden but subagents are running */}
+      {!subagentPanelVisible && runningSubagentCount > 0 && (
+        <box
+          style={{
+            position: 'absolute',
+            bottom: 2,
+            right: 2,
+            paddingLeft: 1,
+            paddingRight: 1,
+            backgroundColor: colors.bg.tertiary,
+            border: true,
+            borderColor: colors.status.info,
+          }}
+        >
+          <text fg={colors.status.info}>
+            ▸ {runningSubagentCount} subagent{runningSubagentCount > 1 ? 's' : ''} running (T to show)
+          </text>
+        </box>
+      )}
+
       {/* Copy feedback toast - positioned at bottom right */}
       {copyFeedback && (
         <box
           style={{
             position: 'absolute',
             bottom: 2,
-            right: 2,
+            right: copyFeedback && !subagentPanelVisible && runningSubagentCount > 0 ? 40 : 2,
             paddingLeft: 1,
             paddingRight: 1,
             backgroundColor: colors.bg.tertiary,

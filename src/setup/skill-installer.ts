@@ -1,19 +1,15 @@
 /**
  * ABOUTME: Skill installation utility for ralph-tui.
- * Provides functions to install skills to CLI-specific skills directories.
- * Supports Claude, Gemini, Codex, and Kiro CLIs.
+ * Provides functions to install skills to agent-specific skills directories.
  * Skills are bundled with ralph-tui and can be installed during setup.
+ * Supports multiple agents (Claude Code, OpenCode, Factory Droid) via plugin-defined paths.
  */
 
 import { readFile, writeFile, mkdir, access, constants, readdir } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { join, dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-
-/**
- * Supported CLI types for skill installation.
- */
-export type CliType = 'claude' | 'gemini' | 'codex' | 'kiro';
+import type { AgentSkillsPaths } from '../plugins/agents/types.js';
 
 /**
  * Result of a skill installation attempt.
@@ -30,9 +26,6 @@ export interface SkillInstallResult {
 
   /** Whether the skill already existed and was skipped */
   skipped?: boolean;
-
-  /** Which CLI the skill was installed for */
-  cli?: CliType;
 }
 
 /**
@@ -50,50 +43,81 @@ export interface SkillInfo {
 }
 
 /**
- * Get the skills directory for a specific CLI.
- * @param cli The CLI type
- * @param cwd Current working directory (for project-level skills like Kiro)
+ * Result of installing a skill to a specific target (personal or repo).
  */
-export function getSkillsDir(cli: CliType, cwd: string = process.cwd()): string {
-  switch (cli) {
-    case 'claude':
-      return join(homedir(), '.claude', 'skills');
-    case 'gemini':
-      return join(homedir(), '.gemini', 'skills');
-    case 'codex':
-      return join(homedir(), '.codex', 'skills');
-    case 'kiro':
-      // Kiro uses project-level powers in .kiro/
-      return join(cwd, '.kiro');
-    default:
-      throw new Error(`Unknown CLI type: ${cli}`);
-  }
+export interface SkillTargetResult {
+  /** Target type ('personal' or 'repo') */
+  target: 'personal' | 'repo';
+
+  /** The installation result */
+  result: SkillInstallResult;
 }
 
 /**
- * Get the skill filename for a specific CLI.
- * Different CLIs use different naming conventions.
+ * Result of installing skills for a specific agent.
  */
-export function getSkillFilename(cli: CliType): string {
-  switch (cli) {
-    case 'claude':
-    case 'gemini':
-      return 'SKILL.md';
-    case 'codex':
-      return 'skill.md'; // lowercase
-    case 'kiro':
-      return 'POWER.md';
-    default:
-      return 'SKILL.md';
+export interface AgentSkillInstallResult {
+  /** Agent plugin ID */
+  agentId: string;
+
+  /** Agent display name */
+  agentName: string;
+
+  /** Results for each skill installed, with per-target results */
+  skills: Map<string, SkillTargetResult[]>;
+
+  /** Whether any skills were successfully installed */
+  hasInstalls: boolean;
+
+  /** Whether all skills were skipped (already installed) */
+  allSkipped: boolean;
+}
+
+/**
+ * Expand ~ in paths to the user's home directory.
+ * Supports both POSIX (~/) and Windows (~\) style paths.
+ */
+export function expandTilde(path: string): string {
+  // Handle ~/ (POSIX) and ~\ (Windows)
+  if (path.startsWith('~/') || path.startsWith('~\\')) {
+    return join(homedir(), path.slice(2));
   }
+  if (path === '~') {
+    return homedir();
+  }
+  return path;
+}
+
+/**
+ * Resolve the absolute path for a skills directory.
+ * Handles ~ expansion and can resolve repo-relative paths.
+ * Supports both POSIX and Windows absolute paths (including drive letters and UNC paths).
+ *
+ * @param skillsPath - Path from AgentSkillsPaths (personal or repo)
+ * @param cwd - Current working directory for repo-relative paths
+ */
+export function resolveSkillsPath(skillsPath: string, cwd?: string): string {
+  // Expand ~ for personal paths (handles both ~/ and ~\)
+  if (skillsPath.startsWith('~')) {
+    return expandTilde(skillsPath);
+  }
+  // Already absolute paths are returned as-is (POSIX, Windows drive letters, UNC paths)
+  if (isAbsolute(skillsPath)) {
+    return skillsPath;
+  }
+  // Repo-relative paths need a working directory
+  if (cwd) {
+    return join(cwd, skillsPath);
+  }
+  return join(process.cwd(), skillsPath);
 }
 
 /**
  * Get the path to the user's Claude Code skills directory.
- * @deprecated Use getSkillsDir('claude') instead
+ * @deprecated Use resolveSkillsPath with plugin.meta.skillsPaths instead
  */
 export function getClaudeSkillsDir(): string {
-  return getSkillsDir('claude');
+  return join(homedir(), '.claude', 'skills');
 }
 
 /**
@@ -174,18 +198,10 @@ export async function listBundledSkills(): Promise<SkillInfo[]> {
 }
 
 /**
- * Check if a skill is already installed for a specific CLI.
- * @param skillName The skill name
- * @param cli The CLI type (defaults to 'claude' for backward compatibility)
- * @param cwd Current working directory (for project-level skills)
+ * Check if a skill is installed at a specific path.
  */
-export async function isSkillInstalled(
-  skillName: string,
-  cli: CliType = 'claude',
-  cwd: string = process.cwd()
-): Promise<boolean> {
-  const skillsDir = getSkillsDir(cli, cwd);
-  const targetPath = join(skillsDir, skillName);
+export async function isSkillInstalledAt(skillName: string, targetDir: string): Promise<boolean> {
+  const targetPath = join(targetDir, skillName);
 
   try {
     await access(targetPath, constants.F_OK);
@@ -196,25 +212,29 @@ export async function isSkillInstalled(
 }
 
 /**
- * Install a bundled skill to a specific CLI's skills directory.
- * @param skillName The skill name to install
- * @param cli The CLI type to install for
- * @param options Installation options
+ * Check if a skill is already installed (Claude Code path).
+ * @deprecated Use isSkillInstalledAt with plugin paths instead
  */
-export async function installSkill(
+export async function isSkillInstalled(skillName: string): Promise<boolean> {
+  return isSkillInstalledAt(skillName, getClaudeSkillsDir());
+}
+
+/**
+ * Install a bundled skill to a specific target directory.
+ *
+ * @param skillName - Name of the bundled skill to install
+ * @param targetDir - Absolute path to the skills directory
+ * @param options - Installation options
+ */
+export async function installSkillTo(
   skillName: string,
+  targetDir: string,
   options: {
     force?: boolean;
-    cli?: CliType;
-    cwd?: string;
   } = {}
 ): Promise<SkillInstallResult> {
-  const cli = options.cli ?? 'claude';
-  const cwd = options.cwd ?? process.cwd();
   const sourcePath = join(getBundledSkillsDir(), skillName);
-  const skillsDir = getSkillsDir(cli, cwd);
-  const targetPath = join(skillsDir, skillName);
-  const targetFilename = getSkillFilename(cli);
+  const targetPath = join(targetDir, skillName);
 
   try {
     // Check if source exists
@@ -225,17 +245,15 @@ export async function installSkill(
       return {
         success: false,
         error: `Skill '${skillName}' not found in bundled skills`,
-        cli,
       };
     }
 
     // Check if already installed
-    if (!options.force && (await isSkillInstalled(skillName, cli, cwd))) {
+    if (!options.force && (await isSkillInstalledAt(skillName, targetDir))) {
       return {
         success: true,
         path: targetPath,
         skipped: true,
-        cli,
       };
     }
 
@@ -243,87 +261,40 @@ export async function installSkill(
     await mkdir(targetPath, { recursive: true });
 
     // Read source SKILL.md
-    let skillContent = await readFile(sourceSkillMd, 'utf-8');
+    const skillContent = await readFile(sourceSkillMd, 'utf-8');
 
-    // For Kiro, convert SKILL.md format to POWER.md format if needed
-    if (cli === 'kiro') {
-      skillContent = convertSkillToPower(skillContent, skillName);
-    }
-
-    // Write to target with appropriate filename
-    const targetSkillMd = join(targetPath, targetFilename);
+    // Write to target
+    const targetSkillMd = join(targetPath, 'SKILL.md');
     await writeFile(targetSkillMd, skillContent, 'utf-8');
 
     return {
       success: true,
       path: targetPath,
-      cli,
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : String(error),
-      cli,
     };
   }
 }
 
 /**
- * Convert a SKILL.md format to Kiro POWER.md format.
- * Adds keywords field if not present.
+ * Install a bundled skill to the user's Claude Code skills directory.
+ * @deprecated Use installSkillTo with plugin paths instead
  */
-function convertSkillToPower(content: string, skillName: string): string {
-  // Check if keywords already exist in frontmatter
-  if (content.includes('keywords:')) {
-    return content;
-  }
-
-  // Add keywords based on skill name
-  const keywords = skillName.split('-').filter(k => k !== 'ralph' && k !== 'tui');
-  const keywordsLine = `keywords:\n  - ${keywords.join('\n  - ')}`;
-
-  // Insert keywords after description in frontmatter
-  const frontmatterEnd = content.indexOf('---', 3);
-  if (frontmatterEnd > 0) {
-    const beforeEnd = content.slice(0, frontmatterEnd);
-    const afterEnd = content.slice(frontmatterEnd);
-    return `${beforeEnd}${keywordsLine}\n${afterEnd}`;
-  }
-
-  return content;
-}
-
-/**
- * Install a skill to all detected CLIs.
- * @param skillName The skill name to install
- * @param detectedClis Array of detected CLI IDs
- * @param options Installation options
- */
-export async function installSkillToAllClis(
+export async function installSkill(
   skillName: string,
-  detectedClis: string[],
   options: {
     force?: boolean;
-    cwd?: string;
   } = {}
-): Promise<Map<CliType, SkillInstallResult>> {
-  const results = new Map<CliType, SkillInstallResult>();
-  const supportedClis: CliType[] = ['claude', 'gemini', 'codex', 'kiro'];
-
-  for (const cli of supportedClis) {
-    // Only install for detected CLIs
-    if (detectedClis.includes(cli)) {
-      const result = await installSkill(skillName, { ...options, cli });
-      results.set(cli, result);
-    }
-  }
-
-  return results;
+): Promise<SkillInstallResult> {
+  return installSkillTo(skillName, getClaudeSkillsDir(), options);
 }
 
 /**
  * Install the ralph-tui-prd skill specifically.
- * @deprecated Use installSkill('ralph-tui-prd', { cli }) instead
+ * @deprecated Use installSkillTo with plugin paths instead
  */
 export async function installRalphTuiPrdSkill(
   options: {
@@ -334,23 +305,22 @@ export async function installRalphTuiPrdSkill(
 }
 
 /**
- * Install all bundled skills to a specific CLI.
- * @param cli The CLI type to install for
- * @param options Installation options
+ * Install all bundled skills to a specific directory.
+ *
+ * @param targetDir - Absolute path to the skills directory
+ * @param options - Installation options
  */
-export async function installAllSkills(
+export async function installAllSkillsTo(
+  targetDir: string,
   options: {
     force?: boolean;
-    cli?: CliType;
-    cwd?: string;
   } = {}
 ): Promise<Map<string, SkillInstallResult>> {
   const results = new Map<string, SkillInstallResult>();
   const skills = await listBundledSkills();
-  const cli = options.cli ?? 'claude';
 
   for (const skill of skills) {
-    const result = await installSkill(skill.name, { ...options, cli });
+    const result = await installSkillTo(skill.name, targetDir, options);
     results.set(skill.name, result);
   }
 
@@ -358,24 +328,114 @@ export async function installAllSkills(
 }
 
 /**
- * Install all bundled skills to all detected CLIs.
- * @param detectedClis Array of detected CLI IDs
- * @param options Installation options
+ * Install all bundled skills to Claude Code skills directory.
+ * @deprecated Use installAllSkillsTo with plugin paths instead
  */
-export async function installAllSkillsToAllClis(
-  detectedClis: string[],
+export async function installAllSkills(
   options: {
     force?: boolean;
-    cwd?: string;
   } = {}
-): Promise<Map<string, Map<CliType, SkillInstallResult>>> {
-  const results = new Map<string, Map<CliType, SkillInstallResult>>();
-  const skills = await listBundledSkills();
+): Promise<Map<string, SkillInstallResult>> {
+  return installAllSkillsTo(getClaudeSkillsDir(), options);
+}
 
-  for (const skill of skills) {
-    const skillResults = await installSkillToAllClis(skill.name, detectedClis, options);
-    results.set(skill.name, skillResults);
+/**
+ * Install skills for an agent using its plugin-defined paths.
+ *
+ * @param agentId - Agent plugin ID (e.g., 'claude', 'opencode', 'droid')
+ * @param agentName - Agent display name for reporting
+ * @param skillsPaths - Agent's skill paths from plugin.meta.skillsPaths
+ * @param options - Installation options
+ */
+export async function installSkillsForAgent(
+  agentId: string,
+  agentName: string,
+  skillsPaths: AgentSkillsPaths,
+  options: {
+    force?: boolean;
+    /** Install to personal (global) directory. Default: true */
+    personal?: boolean;
+    /** Install to repo-local directory */
+    repo?: boolean;
+    /** Working directory for repo-relative paths */
+    cwd?: string;
+    /** Specific skill to install (if not set, installs all) */
+    skillName?: string;
+  } = {}
+): Promise<AgentSkillInstallResult> {
+  const { force = false, personal = true, repo = false, cwd, skillName } = options;
+  const allResults = new Map<string, SkillTargetResult[]>();
+
+  // Build list of targets with their resolved paths and labels
+  const targets: Array<{ label: 'personal' | 'repo'; dir: string }> = [];
+  if (personal) {
+    targets.push({ label: 'personal', dir: resolveSkillsPath(skillsPaths.personal) });
+  }
+  if (repo) {
+    targets.push({ label: 'repo', dir: resolveSkillsPath(skillsPaths.repo, cwd) });
   }
 
-  return results;
+  // Get skills to install
+  const bundledSkills = await listBundledSkills();
+  const skillsToInstall = skillName
+    ? bundledSkills.filter(s => s.name === skillName)
+    : bundledSkills;
+
+  // Install to each target directory, preserving per-target results
+  for (const skill of skillsToInstall) {
+    const skillResults: SkillTargetResult[] = [];
+    for (const target of targets) {
+      const result = await installSkillTo(skill.name, target.dir, { force });
+      skillResults.push({ target: target.label, result });
+    }
+    allResults.set(skill.name, skillResults);
+  }
+
+  // Compute summary flags by checking all target results
+  let hasInstalls = false;
+  let allSkipped = true;
+
+  for (const targetResults of allResults.values()) {
+    for (const { result } of targetResults) {
+      if (result.success && !result.skipped) {
+        hasInstalls = true;
+        allSkipped = false;
+      } else if (!result.success) {
+        allSkipped = false;
+      }
+    }
+  }
+
+  return {
+    agentId,
+    agentName,
+    skills: allResults,
+    hasInstalls,
+    allSkipped,
+  };
+}
+
+/**
+ * Get the installation status of skills for an agent.
+ *
+ * @param skillsPaths - Agent's skill paths from plugin.meta.skillsPaths
+ * @param cwd - Working directory for repo-relative paths
+ */
+export async function getSkillStatusForAgent(
+  skillsPaths: AgentSkillsPaths,
+  cwd?: string
+): Promise<Map<string, { personal: boolean; repo: boolean }>> {
+  const status = new Map<string, { personal: boolean; repo: boolean }>();
+  const bundledSkills = await listBundledSkills();
+
+  const personalDir = resolveSkillsPath(skillsPaths.personal);
+  const repoDir = resolveSkillsPath(skillsPaths.repo, cwd);
+
+  for (const skill of bundledSkills) {
+    const personalInstalled = await isSkillInstalledAt(skill.name, personalDir);
+    const repoInstalled = await isSkillInstalledAt(skill.name, repoDir);
+    status.set(skill.name, { personal: personalInstalled, repo: repoInstalled });
+  }
+
+  return status;
 }
