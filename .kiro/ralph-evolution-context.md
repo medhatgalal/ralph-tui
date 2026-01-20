@@ -3,7 +3,7 @@
 **Project:** Extend ralph-tui with multi-CLI support + EngOS integration
 **Philosophy:** Rich Hickey's "Simple Made Easy" - decomplect, favor simplicity, data over abstractions
 **Started:** 2026-01-16
-**Status:** Theme 1 Complete - v0.2.1 merged and installed
+**Status:** Theme 1 Complete - v0.2.1 tested with Kiro
 
 ---
 
@@ -16,27 +16,49 @@
 
 ---
 
+## Testing Completed
+
+### Calc Platform Test Project (`~/Desktop/ralph-test-calc`)
+- **12 user stories** executed autonomously with Kiro (40 mins)
+- **Results:** CLI ✅, TUI ✅, Core calc ✅, Web UI ❌ (browser import bug)
+- **Lesson:** PRDs need quality gates and testable acceptance criteria
+
+### Quality Assessment
+| Component | Status |
+|-----------|--------|
+| TypeScript compilation | ✅ Pass |
+| Unit tests (core) | ✅ 26/26 pass |
+| CLI interface | ✅ Works |
+| TUI interface | ✅ Works |
+| Web UI | ❌ Fixed manually (browser import issue) |
+| API tests | ⚠️ Need running server |
+
+---
+
 ## Goals
 
 ### Theme 1: Multi-CLI Support ✅ COMPLETE
 Extend ralph-tui to support Gemini CLI, Kiro CLI, and Codex CLI alongside existing Claude Code support.
 
-**Spec Location:** `.kiro/specs/theme1-multi-cli-support.md`
-**Install Docs:** `docs/INSTALL-FORK.md`
-
 ### Theme 2: EngOS Skill (DEFERRED)
 Build a self-evolving, self-evaluating AI skill integrated with ralph-tui.
-Uses EngOS for Humans v4.4 guide: `temp/EngOS_Guide_for_Humans_v4.4.md`
 
 ---
 
-## Key Fixes Applied
+## Key Learnings: Effective Ralph-TUI Usage
 
-| Fix | Description |
-|-----|-------------|
-| kiro-cli -V | Use `-V` flag (instant) instead of `version` subcommand |
-| PATH resolution | All agents store full path from detect() for execute() |
-| skillsPaths | Added to gemini, codex, kiro for v0.2.1 multi-agent skills |
+### PRD Best Practices
+1. **Quality Gates section** - Commands that must pass for every story
+2. **Testable acceptance criteria** - Exact commands with expected output
+3. **Smaller stories** - Each independently verifiable
+4. **Amend stories** - Set `passes: false` to re-run, add new stories for fixes
+
+### Amending PRDs
+```bash
+# Ralph picks up any story with passes: false
+# Add fix stories with specific acceptance criteria
+# Run: ralph-tui run --prd ./prd.json --agent kiro
+```
 
 ---
 

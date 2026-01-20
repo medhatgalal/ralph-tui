@@ -1,7 +1,94 @@
 # Ralph Evolution - Insights
 
 **Purpose:** Capture learnings, improvements, facts, and intelligence beyond the context file.
-**Last Updated:** 2026-01-16
+**Last Updated:** 2026-01-20
+
+---
+
+## Testing Results & Learnings (2026-01-20)
+
+### Calc Platform Test Project
+
+**Execution:** 12 user stories, 40 minutes autonomous with Kiro CLI
+
+**Results:**
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Core calculator | ✅ | 26/26 unit tests pass |
+| CLI interface | ✅ | Works correctly |
+| TUI interface | ✅ | Works correctly |
+| Web UI | ❌ | Browser import bug - fixed manually |
+| API tests | ⚠️ | Need running server |
+
+**Root Cause of Web UI Failure:**
+```javascript
+// ❌ Browser can't resolve Node.js imports
+import{calc}from'../dist/index.js';
+
+// ✅ Fixed: Embedded browser-compatible calculator
+function calc(expr) { /* browser-safe implementation */ }
+```
+
+### Why Ralph-TUI Didn't Catch It
+1. No browser testing capability
+2. Trusted agent's "COMPLETE" signal without verification
+3. Unit tests passed; integration didn't
+4. PRD lacked specific testable criteria
+
+---
+
+## PRD Best Practices (Critical)
+
+### Quality Gates Section (Required)
+```markdown
+## Quality Gates
+These commands must pass for EVERY story:
+- `npm run typecheck` - Zero TypeScript errors
+- `npm test` - All tests pass (0 failures)
+```
+
+### Testable Acceptance Criteria
+**Bad:**
+```
+- Works in browser
+```
+
+**Good:**
+```
+- [ ] `npm run serve` starts server on port 3000
+- [ ] Browser console shows no errors on page load
+- [ ] Entering "2+2" and clicking Calculate displays "4"
+```
+
+### Smaller Stories
+Instead of "US-004: Web UI" (massive), break into:
+- US-004a: Static HTML form
+- US-004b: Browser-compatible calc function
+- US-004c: Form submission with result display
+
+---
+
+## Amending PRDs After Issues
+
+### Add Fix Stories
+```json
+{
+  "id": "US-013",
+  "title": "Fix Web UI Browser Compatibility",
+  "acceptanceCriteria": [
+    "public/index.html must NOT import from ../dist/*.js",
+    "npm run serve and entering 2+2 shows 4"
+  ],
+  "passes": false
+}
+```
+
+### Re-run Failed Stories
+Set `"passes": false` on any story to re-run it.
+
+### Ralph-TUI Picks Up
+- Any story with `passes: false`
+- New stories added to the array
 
 ---
 
