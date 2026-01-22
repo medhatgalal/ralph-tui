@@ -652,6 +652,47 @@ export function IterationDetailView({
           <text fg={colors.fg.secondary}> - {iteration.task.title}</text>
         </box>
 
+        {/* Dependencies section - shows blocking relationships */}
+        {((iteration.task.dependsOn && iteration.task.dependsOn.length > 0) ||
+          (iteration.task.blocks && iteration.task.blocks.length > 0)) && (
+          <box style={{ marginBottom: 2 }}>
+            <SectionHeader title="Dependencies" />
+            <box
+              style={{
+                padding: 1,
+                backgroundColor: colors.bg.secondary,
+                border: true,
+                borderColor: colors.border.muted,
+                flexDirection: 'column',
+              }}
+            >
+              {/* Tasks that block this one (this task depends on them) */}
+              {iteration.task.dependsOn && iteration.task.dependsOn.length > 0 && (
+                <box style={{ marginBottom: iteration.task.blocks && iteration.task.blocks.length > 0 ? 1 : 0 }}>
+                  <text fg={colors.status.warning}>Blocked by:</text>
+                  {iteration.task.dependsOn.map((dep) => (
+                    <text key={dep} fg={colors.fg.secondary}>
+                      {'  '}- {dep}
+                    </text>
+                  ))}
+                </box>
+              )}
+
+              {/* Tasks that this one blocks (they depend on this task) */}
+              {iteration.task.blocks && iteration.task.blocks.length > 0 && (
+                <box>
+                  <text fg={colors.accent.tertiary}>Blocks:</text>
+                  {iteration.task.blocks.map((dep) => (
+                    <text key={dep} fg={colors.fg.secondary}>
+                      {'  '}- {dep}
+                    </text>
+                  ))}
+                </box>
+              )}
+            </box>
+          </box>
+        )}
+
         {/* Metadata section */}
         <box style={{ marginBottom: 2 }}>
           <SectionHeader title="Details" />
