@@ -22,6 +22,7 @@ import type {
   IterationRateLimitedEvent,
   RateLimitState,
   SubagentTreeNode,
+  TaskAutoCommittedEvent,
 } from './types.js';
 import { toEngineSubagentState } from './types.js';
 import type { RalphConfig, RateLimitHandlingConfig } from '../config/types.js';
@@ -41,6 +42,7 @@ import {
 } from '../plugins/agents/opencode/outputParser.js';
 import { updateSessionIteration, updateSessionStatus, updateSessionMaxIterations } from '../session/index.js';
 import { saveIterationLog, buildSubagentTrace, createProgressEntry, appendProgress, getRecentProgressSummary, getCodebasePatternsForPrompt } from '../logs/index.js';
+import { performAutoCommit } from './auto-commit.js';
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
 
@@ -1017,6 +1019,11 @@ export class ExecutionEngine {
         this.clearRateLimitedAgents();
       }
 
+      // Auto-commit after task completion (before iteration log is saved)
+      if (taskCompleted && this.config.autoCommit) {
+        await this.handleAutoCommit(task, iteration);
+      }
+
       // Determine iteration status
       let status: IterationStatus;
       if (agentResult.interrupted) {
@@ -1874,6 +1881,28 @@ export class ExecutionEngine {
   }
 
   /**
+   * Perform auto-commit after successful task completion.
+   * Failures are logged but do not halt engine execution.
+   */
+  private async handleAutoCommit(task: TrackerTask, iteration: number): Promise<void> {
+    try {
+      const result = await performAutoCommit(this.config.cwd, task.id, task.title);
+      if (result.committed) {
+        this.emit({
+          type: 'task:auto-committed',
+          timestamp: new Date().toISOString(),
+          task,
+          iteration,
+          commitMessage: result.commitMessage!,
+          commitSha: result.commitSha,
+        });
+      }
+    } catch {
+      // Auto-commit failures must never stop the engine
+    }
+  }
+
+  /**
    * Dispose of engine resources
    */
   async dispose(): Promise<void> {
@@ -1899,6 +1928,7 @@ export type {
   IterationRateLimitedEvent,
   IterationResult,
   IterationStatus,
+  TaskAutoCommittedEvent,
   RateLimitState,
   SubagentTreeNode,
 };

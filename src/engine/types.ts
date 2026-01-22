@@ -207,6 +207,7 @@ export type EngineEventType =
   | 'task:selected'
   | 'task:activated'
   | 'task:completed'
+  | 'task:auto-committed'
   | 'agent:output'
   | 'agent:switched'
   | 'agent:all-limited'
@@ -435,6 +436,21 @@ export interface TaskCompletedEvent extends EngineEventBase {
 }
 
 /**
+ * Task auto-committed event - emitted when auto-commit creates a git commit after task completion
+ */
+export interface TaskAutoCommittedEvent extends EngineEventBase {
+  type: 'task:auto-committed';
+  /** Task that was committed */
+  task: TrackerTask;
+  /** Iteration number */
+  iteration: number;
+  /** Commit message used */
+  commitMessage: string;
+  /** Short SHA of the commit (if available) */
+  commitSha?: string;
+}
+
+/**
  * Agent output event (streaming)
  */
 export interface AgentOutputEvent extends EngineEventBase {
@@ -534,6 +550,7 @@ export type EngineEvent =
   | TaskSelectedEvent
   | TaskActivatedEvent
   | TaskCompletedEvent
+  | TaskAutoCommittedEvent
   | AgentOutputEvent
   | AgentSwitchedEvent
   | AllAgentsLimitedEvent
