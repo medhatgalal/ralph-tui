@@ -34,6 +34,16 @@ class TestableOpenCodePlugin extends OpenCodeAgentPlugin {
   ): string | undefined {
     return this['getStdinInput'](prompt, files, options);
   }
+
+  /** Expose getPreflightSuggestion for testing */
+  testGetPreflightSuggestion(): string {
+    return this['getPreflightSuggestion']();
+  }
+
+  /** Expose buildModelString for testing */
+  testBuildModelString(): string | undefined {
+    return this['buildModelString']();
+  }
 }
 
 describe('OpenCodeAgentPlugin', () => {
@@ -234,6 +244,88 @@ describe('OpenCodeAgentPlugin', () => {
       await plugin.initialize({});
       await plugin.dispose();
       expect(await plugin.isReady()).toBe(false);
+    });
+  });
+
+  describe('getSandboxRequirements', () => {
+    test('returns correct auth paths', () => {
+      const requirements = plugin.getSandboxRequirements();
+      expect(requirements.authPaths).toContain('~/.opencode');
+      expect(requirements.authPaths).toContain('~/.config/opencode');
+      expect(requirements.authPaths).toContain('~/.local/share/opencode');
+    });
+
+    test('returns correct binary paths', () => {
+      const requirements = plugin.getSandboxRequirements();
+      expect(requirements.binaryPaths).toContain('/usr/local/bin');
+      expect(requirements.binaryPaths).toContain('~/.local/bin');
+      expect(requirements.binaryPaths).toContain('~/go/bin');
+    });
+
+    test('requires network', () => {
+      const requirements = plugin.getSandboxRequirements();
+      expect(requirements.requiresNetwork).toBe(true);
+    });
+
+    test('has empty runtime paths', () => {
+      const requirements = plugin.getSandboxRequirements();
+      expect(requirements.runtimePaths).toEqual([]);
+    });
+  });
+
+  describe('getPreflightSuggestion', () => {
+    let testablePlugin: TestableOpenCodePlugin;
+
+    beforeEach(async () => {
+      testablePlugin = new TestableOpenCodePlugin();
+      await testablePlugin.initialize({});
+    });
+
+    afterEach(async () => {
+      await testablePlugin.dispose();
+    });
+
+    test('returns helpful suggestion text', () => {
+      const suggestion = testablePlugin.testGetPreflightSuggestion();
+      expect(suggestion).toContain('Common fixes for OpenCode');
+      expect(suggestion).toContain('opencode run');
+      expect(suggestion).toContain('API key');
+    });
+  });
+
+  describe('buildModelString', () => {
+    let testablePlugin: TestableOpenCodePlugin;
+
+    beforeEach(async () => {
+      testablePlugin = new TestableOpenCodePlugin();
+    });
+
+    afterEach(async () => {
+      await testablePlugin.dispose();
+    });
+
+    test('returns provider/model format when both set', async () => {
+      await testablePlugin.initialize({ provider: 'anthropic', model: 'claude-3-5-sonnet' });
+      const result = testablePlugin.testBuildModelString();
+      expect(result).toBe('anthropic/claude-3-5-sonnet');
+    });
+
+    test('returns model only when no provider', async () => {
+      await testablePlugin.initialize({ model: 'gpt-4o' });
+      const result = testablePlugin.testBuildModelString();
+      expect(result).toBe('gpt-4o');
+    });
+
+    test('returns undefined when no model', async () => {
+      await testablePlugin.initialize({});
+      const result = testablePlugin.testBuildModelString();
+      expect(result).toBeUndefined();
+    });
+
+    test('handles model with embedded provider', async () => {
+      await testablePlugin.initialize({ model: 'openai/gpt-4o' });
+      const result = testablePlugin.testBuildModelString();
+      expect(result).toBe('openai/gpt-4o');
     });
   });
 
