@@ -15,6 +15,7 @@ import { registerBuiltinAgents } from '../plugins/agents/builtin/index.js';
 import { registerBuiltinTrackers } from '../plugins/trackers/builtin/index.js';
 import { getUserConfigDir } from '../templates/engine.js';
 import { listBundledSkills, resolveSkillsPath } from '../setup/skill-installer.js';
+import { getEnvExclusionReport, type EnvExclusionReport } from '../plugins/agents/base.js';
 
 /**
  * Compute the path to package.json based on the current module location.
@@ -147,6 +148,9 @@ export interface SystemInfo {
 
   /** Skills info */
   skills: SkillsInfo;
+
+  /** Environment variable exclusion info */
+  envExclusion: EnvExclusionReport;
 }
 
 /**
@@ -302,6 +306,13 @@ export async function collectSystemInfo(cwd: string = process.cwd()): Promise<Sy
   // Collect skills info
   const skills = await collectSkillsInfo(agentRegistry, config.skills_dir ?? null, cwd);
 
+  // Collect env exclusion info
+  const envExclusion = getEnvExclusionReport(
+    process.env,
+    config.envPassthrough,
+    config.envExclude
+  );
+
   // Determine runtime
   const isBun = typeof Bun !== 'undefined';
   const runtimeVersion = isBun ? Bun.version : process.version;
@@ -337,6 +348,7 @@ export async function collectSystemInfo(cwd: string = process.cwd()): Promise<Sy
       name: trackerName,
     },
     skills,
+    envExclusion,
   };
 }
 
@@ -409,6 +421,18 @@ export function formatSystemInfo(info: SystemInfo): string {
     lines.push(`  ${agent.name}${status}:`);
     lines.push(`    Path: ${agent.personalDir}`);
     lines.push(`    Installed: ${agent.personalSkills.length > 0 ? agent.personalSkills.join(', ') : '(none)'}`);
+  }
+
+  // Environment variable exclusion info
+  if (info.envExclusion.blocked.length > 0 || info.envExclusion.allowed.length > 0) {
+    lines.push('');
+    lines.push('Environment (vars matching default exclusion patterns):');
+    if (info.envExclusion.blocked.length > 0) {
+      lines.push(`  Blocked:     ${info.envExclusion.blocked.join(', ')}`);
+    }
+    if (info.envExclusion.allowed.length > 0) {
+      lines.push(`  Passthrough: ${info.envExclusion.allowed.join(', ')}`);
+    }
   }
 
   return lines.join('\n');

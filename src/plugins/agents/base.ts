@@ -218,6 +218,32 @@ export function getEnvExclusionReport(
   return { blocked: blocked.sort(), allowed: allowed.sort() };
 }
 
+/**
+ * Format an env exclusion report as human-readable lines for console output.
+ * Returns an empty array if no sensitive vars were detected (reduces noise).
+ *
+ * @param report The exclusion report to format
+ * @returns Array of formatted lines (empty if nothing to report)
+ */
+export function formatEnvExclusionReport(report: EnvExclusionReport): string[] {
+  if (report.blocked.length === 0 && report.allowed.length === 0) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  lines.push('Environment variables (matching default exclusion patterns):');
+
+  if (report.blocked.length > 0) {
+    lines.push(`  Blocked:     ${report.blocked.join(', ')}`);
+  }
+
+  if (report.allowed.length > 0) {
+    lines.push(`  Passthrough: ${report.allowed.join(', ')}`);
+  }
+
+  return lines;
+}
+
 export abstract class BaseAgentPlugin implements AgentPlugin {
   abstract readonly meta: AgentPluginMeta;
 

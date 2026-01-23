@@ -8,6 +8,7 @@ import { loadStoredConfig } from '../config/index.js';
 import { getAgentRegistry } from '../plugins/agents/registry.js';
 import { registerBuiltinAgents } from '../plugins/agents/builtin/index.js';
 import type { AgentPlugin, AgentPreflightResult, AgentDetectResult } from '../plugins/agents/types.js';
+import { getEnvExclusionReport, formatEnvExclusionReport, type EnvExclusionReport } from '../plugins/agents/base.js';
 
 /**
  * Result of the doctor command diagnostics
@@ -27,6 +28,9 @@ export interface DoctorResult {
 
   /** Preflight result (only if detection passed) */
   preflight?: AgentPreflightResult;
+
+  /** Environment variable exclusion report */
+  envExclusion?: EnvExclusionReport;
 
   /** Summary message */
   message: string;
@@ -83,6 +87,21 @@ async function runDiagnostics(
     };
   }
 
+  // Check environment variable exclusions
+  const envExclusion = getEnvExclusionReport(
+    process.env,
+    storedConfig.envPassthrough,
+    storedConfig.envExclude
+  );
+  const envLines = formatEnvExclusionReport(envExclusion);
+  if (envLines.length > 0) {
+    log('');
+    for (const line of envLines) {
+      log(`  ${line}`);
+    }
+    log('');
+  }
+
   // Run detection
   log(`\n🔍 Checking ${agent.meta.name}...\n`);
   log('  Step 1: Detection (checking if CLI is available)...');
@@ -126,6 +145,7 @@ async function runDiagnostics(
     agent: { name: agent.meta.name, plugin: agent.meta.id },
     detection,
     preflight,
+    envExclusion,
     message: 'Agent is healthy and ready to use',
   };
 }
@@ -185,6 +205,18 @@ function printHumanResult(result: DoctorResult): void {
           console.log(`    ${line}`);
         }
       }
+    }
+    console.log('');
+  }
+
+  // Environment variable exclusion info
+  if (result.envExclusion && (result.envExclusion.blocked.length > 0 || result.envExclusion.allowed.length > 0)) {
+    console.log('  Environment:');
+    if (result.envExclusion.blocked.length > 0) {
+      console.log(`    Blocked:     ${result.envExclusion.blocked.join(', ')}`);
+    }
+    if (result.envExclusion.allowed.length > 0) {
+      console.log(`    Passthrough: ${result.envExclusion.allowed.join(', ')}`);
     }
     console.log('');
   }

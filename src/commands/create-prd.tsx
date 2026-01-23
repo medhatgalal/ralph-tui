@@ -16,6 +16,7 @@ import { getAgentRegistry } from '../plugins/agents/registry.js';
 import { registerBuiltinAgents } from '../plugins/agents/builtin/index.js';
 import type { AgentPlugin, AgentPluginConfig } from '../plugins/agents/types.js';
 import { executeRunCommand } from './run.js';
+import { getEnvExclusionReport, formatEnvExclusionReport } from '../plugins/agents/base.js';
 
 /**
  * Command-line arguments for the create-prd command.
@@ -245,6 +246,7 @@ async function getAgent(agentName?: string): Promise<AgentPlugin | null> {
       options: storedConfig.agentOptions || {},
       command: storedConfig.command,
       envExclude: storedConfig.envExclude,
+      envPassthrough: storedConfig.envPassthrough,
     };
 
     // Get agent instance
@@ -287,6 +289,20 @@ async function runChatMode(parsedArgs: CreatePrdArgs): Promise<PrdCreationResult
   const timeout = parsedArgs.timeout ?? 0;
 
   console.log(`Using agent: ${agent.meta.name}`);
+
+  // Show environment variable exclusion report upfront
+  const storedConfig = await loadStoredConfig(cwd);
+  const envReport = getEnvExclusionReport(
+    process.env,
+    storedConfig.envPassthrough,
+    storedConfig.envExclude
+  );
+  const envLines = formatEnvExclusionReport(envReport);
+  if (envLines.length > 0) {
+    for (const line of envLines) {
+      console.log(line);
+    }
+  }
 
   // Run preflight check to verify agent can respond before starting conversation
   console.log('Verifying agent configuration...');

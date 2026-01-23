@@ -199,6 +199,10 @@ describe('formatSystemInfo', () => {
         },
       ],
     },
+    envExclusion: {
+      blocked: [],
+      allowed: [],
+    },
   };
 
   test('includes version info', () => {
@@ -347,6 +351,10 @@ describe('formatForBugReport', () => {
           personalSkills: ['ralph-tui-prd'],
         },
       ],
+    },
+    envExclusion: {
+      blocked: [],
+      allowed: [],
     },
   };
 

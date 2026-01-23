@@ -72,6 +72,7 @@ import {
 import type { ConnectionToastMessage } from '../tui/components/Toast.js';
 import { spawnSync } from 'node:child_process';
 import { basename } from 'node:path';
+import { getEnvExclusionReport, formatEnvExclusionReport } from '../plugins/agents/base.js';
 
 /**
  * Get git repository information for the current working directory.
@@ -1541,6 +1542,20 @@ export async function executeRunCommand(args: string[]): Promise<void> {
   // Show warnings
   for (const warning of validation.warnings) {
     console.warn(`Warning: ${warning}`);
+  }
+
+  // Show environment variable exclusion report upfront
+  const envReport = getEnvExclusionReport(
+    process.env,
+    storedConfig?.envPassthrough,
+    storedConfig?.envExclude
+  );
+  const envLines = formatEnvExclusionReport(envReport);
+  if (envLines.length > 0) {
+    for (const line of envLines) {
+      console.log(line);
+    }
+    console.log('');
   }
 
   // Run preflight check if --verify flag is specified
