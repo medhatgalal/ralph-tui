@@ -135,7 +135,7 @@ async function acquireLock(): Promise<FileHandle> {
       // O_CREAT | O_EXCL ensures atomic creation - fails if file exists
       // Windows doesn't support numeric flags with Unix permissions, so use string flag 'wx'
       const handle = IS_WINDOWS
-        ? await open(lockPath, 'wx')
+        ? await open(lockPath, 'wx', FILE_MODE)
         : await open(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, FILE_MODE);
       // Write our PID for debugging stale locks
       await handle.write(`${process.pid}\n`);
@@ -225,7 +225,7 @@ async function saveRegistryInternal(registry: SessionRegistry): Promise<void> {
     // Write to temp file with restrictive permissions
     // Windows doesn't support numeric flags with Unix permissions, so use string flag 'w'
     tempHandle = IS_WINDOWS
-      ? await open(tempPath, 'w')
+      ? await open(tempPath, 'w', FILE_MODE)
       : await open(tempPath, constants.O_CREAT | constants.O_WRONLY | constants.O_TRUNC, FILE_MODE);
     const content = JSON.stringify(registry, null, 2);
     await tempHandle.write(content);
