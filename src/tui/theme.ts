@@ -202,6 +202,7 @@ export const fullKeyboardShortcuts = [
   { key: 'Ctrl+C ×2', description: 'Force quit immediately', category: 'System' },
   { key: 'w', description: 'Toggle parallel workers view', category: 'Parallel' },
   { key: 'm', description: 'Toggle merge progress view', category: 'Parallel' },
+  { key: 'x', description: 'Kill all workers (with confirmation)', category: 'Parallel' },
   { key: 'Enter', description: 'Drill into worker detail', category: 'Parallel' },
   { key: 'Esc', description: 'Back to previous view', category: 'Parallel' },
 ] as const;

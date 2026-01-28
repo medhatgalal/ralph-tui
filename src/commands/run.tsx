@@ -787,6 +787,20 @@ interface RunAppWrapperProps {
   parallelConflictTaskTitle?: string;
   /** Whether AI conflict resolution is running */
   parallelAiResolving?: boolean;
+  /** Maps task IDs to worker IDs for output routing in parallel mode */
+  parallelTaskIdToWorkerId?: Map<string, string>;
+  /** Number of currently active (running) workers */
+  activeWorkerCount?: number;
+  /** Total number of workers */
+  totalWorkerCount?: number;
+  /** Callback to pause parallel execution */
+  onParallelPause?: () => void;
+  /** Callback to resume parallel execution */
+  onParallelResume?: () => void;
+  /** Callback to immediately kill all parallel workers */
+  onParallelKill?: () => Promise<void>;
+  /** Callback to restart parallel execution after stop/complete */
+  onParallelStart?: () => void;
 }
 
 /**
@@ -824,6 +838,13 @@ function RunAppWrapper({
   parallelConflictTaskId,
   parallelConflictTaskTitle,
   parallelAiResolving,
+  parallelTaskIdToWorkerId,
+  activeWorkerCount,
+  totalWorkerCount,
+  onParallelPause,
+  onParallelResume,
+  onParallelKill,
+  onParallelStart,
 }: RunAppWrapperProps) {
   const [showInterruptDialog, setShowInterruptDialog] = useState(false);
   const [storedConfig, setStoredConfig] = useState<StoredConfig | undefined>(initialStoredConfig);
@@ -1012,6 +1033,13 @@ function RunAppWrapper({
       parallelConflictTaskId={parallelConflictTaskId}
       parallelConflictTaskTitle={parallelConflictTaskTitle}
       parallelAiResolving={parallelAiResolving}
+      parallelTaskIdToWorkerId={parallelTaskIdToWorkerId}
+      activeWorkerCount={activeWorkerCount}
+      totalWorkerCount={totalWorkerCount}
+      onParallelPause={onParallelPause}
+      onParallelResume={onParallelResume}
+      onParallelKill={onParallelKill}
+      onParallelStart={onParallelStart}
     />
   );
 }
@@ -1318,6 +1346,8 @@ async function runParallelWithTui(
     conflictTaskId: '',
     conflictTaskTitle: '',
     aiResolving: false,
+    /** Maps task IDs to their assigned worker IDs for output routing */
+    taskIdToWorkerId: new Map<string, string>(),
   };
 
   // Render trigger — forces React to re-render with updated parallel state.
@@ -1347,6 +1377,8 @@ async function runParallelWithTui(
       case 'worker:created':
         // Worker created but not yet started — refresh from executor
         parallelState.workers = parallelExecutor.getWorkerStates();
+        // Record task→worker mapping for output routing in the TUI
+        parallelState.taskIdToWorkerId.set(event.task.id, event.workerId);
         break;
 
       case 'worker:started':
@@ -1520,6 +1552,26 @@ async function runParallelWithTui(
         parallelConflictTaskId={parallelState.conflictTaskId}
         parallelConflictTaskTitle={parallelState.conflictTaskTitle}
         parallelAiResolving={parallelState.aiResolving}
+        parallelTaskIdToWorkerId={parallelState.taskIdToWorkerId}
+        activeWorkerCount={parallelState.workers.filter((w) => w.status === 'running').length}
+        totalWorkerCount={parallelState.workers.length}
+        onParallelPause={() => parallelExecutor.pause()}
+        onParallelResume={() => parallelExecutor.resume()}
+        onParallelKill={async () => {
+          await parallelExecutor.stop();
+        }}
+        onParallelStart={() => {
+          // Reset executor state and re-run
+          parallelState.workers = [];
+          parallelState.workerOutputs.clear();
+          parallelState.taskIdToWorkerId.clear();
+          parallelExecutor.reset();
+          parallelExecutor.execute().then(() => {
+            triggerRerender?.();
+          }).catch(() => {
+            triggerRerender?.();
+          });
+        }}
       />
     );
   }

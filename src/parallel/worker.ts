@@ -199,6 +199,20 @@ export class Worker {
   }
 
   /**
+   * Pause the worker's execution engine after the current iteration completes.
+   */
+  pause(): void {
+    this.engine?.pause();
+  }
+
+  /**
+   * Resume the worker's execution engine from paused state.
+   */
+  resume(): void {
+    this.engine?.resume();
+  }
+
+  /**
    * Get the current display state for TUI rendering.
    */
   getDisplayState(): WorkerDisplayState {

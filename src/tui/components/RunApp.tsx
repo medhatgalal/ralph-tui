@@ -176,6 +176,20 @@ export interface RunAppProps {
   parallelConflictTaskTitle?: string;
   /** Whether AI conflict resolution is running */
   parallelAiResolving?: boolean;
+  /** Maps task IDs to worker IDs for output routing in parallel mode */
+  parallelTaskIdToWorkerId?: Map<string, string>;
+  /** Number of currently active (running) workers */
+  activeWorkerCount?: number;
+  /** Total number of workers */
+  totalWorkerCount?: number;
+  /** Callback to pause parallel execution */
+  onParallelPause?: () => void;
+  /** Callback to resume parallel execution */
+  onParallelResume?: () => void;
+  /** Callback to immediately kill all parallel workers */
+  onParallelKill?: () => Promise<void>;
+  /** Callback to restart parallel execution after stop/complete */
+  onParallelStart?: () => void;
 }
 
 /**
@@ -425,6 +439,13 @@ export function RunApp({
   parallelConflictTaskId = '',
   parallelConflictTaskTitle = '',
   parallelAiResolving = false,
+  parallelTaskIdToWorkerId,
+  activeWorkerCount,
+  totalWorkerCount,
+  onParallelPause,
+  onParallelResume,
+  onParallelKill,
+  onParallelStart,
 }: RunAppProps): ReactNode {
   const { width, height } = useTerminalDimensions();
   const renderer = useRenderer();
@@ -472,8 +493,8 @@ export function RunApp({
   // Iteration history state
   const [iterations, setIterations] = useState<IterationResult[]>([]);
   const [totalIterations] = useState(10); // Default max iterations for display
-  // In parallel mode, start with the parallel-overview view to show worker status
-  const [viewMode, setViewMode] = useState<ViewMode>(isParallelMode ? 'parallel-overview' : 'tasks');
+  // Always start with the task list view — parallel mode shows multiple ▶ tasks natively
+  const [viewMode, setViewMode] = useState<ViewMode>('tasks');
   const [iterationSelectedIndex, setIterationSelectedIndex] = useState(0);
   // Iteration detail view state
   const [detailIteration, setDetailIteration] = useState<IterationResult | null>(null);
@@ -492,6 +513,8 @@ export function RunApp({
   const [editingRemote, setEditingRemote] = useState<ExistingRemoteData | undefined>(undefined);
   // Quit confirmation dialog state
   const [showQuitDialog, setShowQuitDialog] = useState(false);
+  // Kill confirmation dialog state (parallel mode: immediately terminate all workers)
+  const [showKillDialog, setShowKillDialog] = useState(false);
   // Parallel mode state
   const [selectedWorkerIndex, setSelectedWorkerIndex] = useState(0);
   const [showConflictPanel, setShowConflictPanel] = useState(false);
@@ -831,14 +854,32 @@ export function RunApp({
     };
 
     // Use remote tasks when viewing remote, local tasks otherwise
-    const sourceTasks = isViewingRemote ? remoteTasks : tasks;
+    let sourceTasks = isViewingRemote ? remoteTasks : tasks;
+
+    // Parallel mode: overlay worker statuses onto tasks in a single render cycle.
+    // LeftPanel already renders ▶ for any task with status 'active', so marking multiple
+    // tasks as active simultaneously will display multiple ▶ icons — the core UX goal.
+    // This is derived state (computed from parallelWorkers), not stored state, which
+    // ensures updates appear on the same render that receives new parallelWorkers props.
+    if (isParallelMode && parallelWorkers?.length) {
+      sourceTasks = sourceTasks.map((task) => {
+        const worker = parallelWorkers.find((w) => w.task?.id === task.id);
+        if (!worker) return task;
+
+        if (worker.status === 'running') return { ...task, status: 'active' as TaskStatus };
+        if (worker.status === 'completed') return { ...task, status: 'done' as TaskStatus };
+        if (worker.status === 'failed') return { ...task, status: 'error' as TaskStatus };
+        return task;
+      });
+    }
+
     const filtered = showClosedTasks ? sourceTasks : sourceTasks.filter((t) => t.status !== 'closed');
     return [...filtered].sort((a, b) => {
       const priorityA = statusPriority[a.status] ?? 10;
       const priorityB = statusPriority[b.status] ?? 10;
       return priorityA - priorityB;
     });
-  }, [tasks, remoteTasks, isViewingRemote, showClosedTasks]);
+  }, [tasks, remoteTasks, isViewingRemote, showClosedTasks, isParallelMode, parallelWorkers]);
 
   // Clamp selectedIndex when displayedTasks shrinks (e.g., when hiding closed tasks)
   useEffect(() => {
@@ -1323,6 +1364,22 @@ export function RunApp({
         return; // Don't process other keys when dialog is showing
       }
 
+      // When kill dialog is showing, handle y/n/Esc
+      if (showKillDialog) {
+        switch (key.name) {
+          case 'y':
+            setShowKillDialog(false);
+            setStatus('stopped');
+            onParallelKill?.();
+            break;
+          case 'n':
+          case 'escape':
+            setShowKillDialog(false);
+            break;
+        }
+        return; // Don't process other keys when dialog is showing
+      }
+
       // When help overlay is showing, ? or Esc closes it
       if (showHelp) {
         if (key.name === '?' || key.name === 'escape') {
@@ -1455,6 +1512,18 @@ export function RunApp({
               setRemoteStatus('selecting');
               instanceManager.sendRemoteCommand('resume');
             }
+          } else if (isParallelMode && onParallelPause && onParallelResume) {
+            // Parallel mode: pause/resume all workers
+            if (status === 'running' || status === 'executing' || status === 'selecting') {
+              onParallelPause();
+              setStatus('pausing');
+            } else if (status === 'pausing') {
+              onParallelResume();
+              setStatus('running');
+            } else if (status === 'paused') {
+              onParallelResume();
+              setStatus('running');
+            }
           } else if (engine) {
             // Local engine control (engine absent in parallel mode)
             if (status === 'running' || status === 'executing' || status === 'selecting') {
@@ -1474,6 +1543,7 @@ export function RunApp({
         // Note: 'c' / Ctrl+C is intentionally NOT handled here.
         // Ctrl+C and Ctrl+Shift+C send the same sequence (\x03) in most terminals,
         // so we can't distinguish between "stop" and "copy". Users should use 'q' to quit.
+
 
         case 'v':
           // Toggle between tasks and iterations view (only if not in detail view)
@@ -1506,7 +1576,13 @@ export function RunApp({
             setViewMode('parallel-detail');
             break;
           }
-          // Fall through for other views
+          // Parallel mode: Enter restarts execution when in a terminal state
+          if (isParallelMode && onParallelStart &&
+              (status === 'stopped' || status === 'complete' || status === 'idle' || status === 'error')) {
+            setStatus('running');
+            onParallelStart();
+            break;
+          }
           break;
 
         case 'd':
@@ -1530,6 +1606,12 @@ export function RunApp({
             // Route to remote instance - send continue command
             if (displayStatus === 'stopped' || displayStatus === 'idle' || displayStatus === 'ready') {
               instanceManager.sendRemoteCommand('continue');
+            }
+          } else if (isParallelMode && onParallelStart) {
+            // Parallel mode: restart execution after stop/complete/idle
+            if (status === 'stopped' || status === 'complete' || status === 'idle' || status === 'error') {
+              setStatus('running');
+              onParallelStart();
             }
           } else if (engine) {
             // Local engine control (engine absent in parallel mode)
@@ -1846,8 +1928,15 @@ export function RunApp({
           }
           break;
 
-        // Remote management: 'x' to delete current remote (only when viewing a remote tab)
+        // 'x' — Kill all workers (parallel mode) or delete remote (remote view)
         case 'x':
+          // Kill all running agents (parallel mode only, with confirmation)
+          if (isParallelMode && onParallelKill &&
+              (status === 'running' || status === 'executing' || status === 'pausing' || status === 'paused')) {
+            setShowKillDialog(true);
+            break;
+          }
+          // Remote management: delete current remote (only when viewing a remote tab)
           if (isViewingRemote && instanceTabs && selectedTabIndex > 0) {
             const tab = instanceTabs[selectedTabIndex];
             if (tab?.alias) {
@@ -1959,6 +2048,23 @@ export function RunApp({
       };
     }
 
+    // Parallel mode: route output from the worker assigned to the selected task.
+    // Each worker's stdout is buffered in parallelWorkerOutputs keyed by workerId.
+    // We use parallelTaskIdToWorkerId to look up which worker handles this task.
+    if (isParallelMode && parallelTaskIdToWorkerId && parallelWorkerOutputs) {
+      const workerId = parallelTaskIdToWorkerId.get(effectiveTaskId ?? '');
+      if (workerId) {
+        const outputLines = parallelWorkerOutputs.get(workerId) ?? [];
+        const output = outputLines.join('\n');
+        return {
+          iteration: 1,
+          output,
+          segments: [{ text: output }],
+          timing: { isRunning: true },
+        };
+      }
+    }
+
     // If no effective task ID, check if there's currently executing task and show that
     if (!effectiveTaskId) {
       // If there's a current task executing, show its output even if no task selected
@@ -2019,7 +2125,7 @@ export function RunApp({
 
     // Task hasn't been run yet (or historical log not yet loaded)
     return { iteration: 0, output: undefined, segments: undefined, timing: undefined };
-  }, [effectiveTaskId, selectedTask, selectedIteration, viewMode, currentTaskId, currentIteration, currentOutput, currentSegments, iterations, historicalOutputCache, currentIterationStartedAt, isViewingRemote, remoteStatus, remoteCurrentIteration, remoteOutput, remoteIterationCache, remoteCurrentTaskId]);
+  }, [effectiveTaskId, selectedTask, selectedIteration, viewMode, currentTaskId, currentIteration, currentOutput, currentSegments, iterations, historicalOutputCache, currentIterationStartedAt, isViewingRemote, remoteStatus, remoteCurrentIteration, remoteOutput, remoteIterationCache, remoteCurrentTaskId, isParallelMode, parallelTaskIdToWorkerId, parallelWorkerOutputs]);
 
   // Compute the actual output to display based on selectedSubagentId
   // When a subagent is selected (not task root), try to get its specific output
@@ -2424,6 +2530,8 @@ export function RunApp({
           }
           autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
           gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
+          activeWorkerCount={activeWorkerCount}
+          totalWorkerCount={totalWorkerCount}
         />
       )}
 
@@ -2641,6 +2749,14 @@ export function RunApp({
         title="⚠ Interrupt Ralph?"
         message="Current iteration will be terminated."
         hint="[y] Yes  [n/Esc] No  [Ctrl+C] Force quit"
+      />
+
+      {/* Kill Confirmation Dialog (parallel mode) */}
+      <ConfirmationDialog
+        visible={showKillDialog}
+        title="⚠ Kill all workers?"
+        message="All running agents will be terminated immediately."
+        hint="[y] Yes, kill all  [n/Esc] Cancel"
       />
 
       {/* Quit Confirmation Dialog */}

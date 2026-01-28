@@ -142,6 +142,26 @@ export class ParallelExecutor {
   }
 
   /**
+   * Reset internal state so the executor can run again.
+   * Call this before `execute()` when restarting after completion or stop.
+   */
+  reset(): void {
+    this.shouldStop = false;
+    this.status = 'idle';
+    this.taskGraph = null;
+    this.currentGroupIndex = 0;
+    this.activeWorkers = [];
+    this.completedResults = [];
+    this.totalTasksCompleted = 0;
+    this.totalTasksFailed = 0;
+    this.totalMergesCompleted = 0;
+    this.totalConflictsResolved = 0;
+    this.startedAt = null;
+    this.requeueCounts.clear();
+    this.sessionId = `parallel-${Date.now()}`;
+  }
+
+  /**
    * Analyze tasks and run parallel execution.
    * Main entry point for the parallel execution flow.
    */
@@ -235,6 +255,24 @@ export class ParallelExecutor {
     await Promise.allSettled(stopPromises);
 
     this.status = 'interrupted';
+  }
+
+  /**
+   * Pause all active workers after their current iterations complete.
+   */
+  pause(): void {
+    for (const worker of this.activeWorkers) {
+      worker.pause();
+    }
+  }
+
+  /**
+   * Resume all active workers from paused state.
+   */
+  resume(): void {
+    for (const worker of this.activeWorkers) {
+      worker.resume();
+    }
   }
 
   /**
