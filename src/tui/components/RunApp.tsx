@@ -2551,11 +2551,16 @@ export function RunApp({
           onCancel={() => setShowEpicLoader(false)}
           onFilePath={async (path: string) => {
             if (onFilePathSwitch) {
-              const success = await onFilePathSwitch(path);
-              if (success) {
-                setShowEpicLoader(false);
-              } else {
-                setEpicLoaderError(`Failed to load file: ${path}`);
+              try {
+                const success = await onFilePathSwitch(path);
+                if (success) {
+                  setShowEpicLoader(false);
+                } else {
+                  setEpicLoaderError(`Failed to load file: ${path}`);
+                }
+              } catch (err) {
+                const detail = err instanceof Error ? ` (${err.message})` : '';
+                setEpicLoaderError(`Failed to load file: ${path}${detail}`);
               }
             }
           }}
