@@ -173,9 +173,15 @@ export class ParallelExecutor {
 
     try {
       // Fetch all tasks from the tracker
-      const tasks = await this.tracker.getTasks({
+      let tasks = await this.tracker.getTasks({
         status: ['open', 'in_progress'],
       });
+
+      // Apply task ID filter if provided (for --task-range support)
+      if (this.config.filteredTaskIds && this.config.filteredTaskIds.length > 0) {
+        const filteredIdSet = new Set(this.config.filteredTaskIds);
+        tasks = tasks.filter((t) => filteredIdSet.has(t.id));
+      }
 
       if (tasks.length === 0) {
         this.status = 'completed';

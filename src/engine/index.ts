@@ -587,6 +587,14 @@ export class ExecutionEngine {
       excludeIds: excludeIds.length > 0 ? excludeIds : undefined,
     });
 
+    // Apply task range filter if specified (via config.filteredTaskIds)
+    // This ensures that only tasks within the specified range are executed
+    if (task && this.config.filteredTaskIds && this.config.filteredTaskIds.length > 0) {
+      if (!this.config.filteredTaskIds.includes(task.id)) {
+        return null; // Task is outside the allowed range
+      }
+    }
+
     return task ?? null;
   }
 

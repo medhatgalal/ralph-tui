@@ -1361,8 +1361,19 @@ export class RemoteServer {
       // Create orchestration ID
       const orchestrationId = `orch-${Date.now().toString(36)}`;
 
-      // Create ParallelExecutor with options
-      const maxWorkers = message.maxWorkers ?? 3;
+      // Validate and determine maxWorkers (must be a positive integer)
+      let maxWorkers = message.maxWorkers ?? 3;
+      if (typeof maxWorkers !== 'number' || !Number.isInteger(maxWorkers) || maxWorkers < 1) {
+        const response = createMessage<OrchestrateStartResponseMessage>('orchestrate:start_response', {
+          success: false,
+          error: `Invalid maxWorkers value: ${message.maxWorkers}. Must be a positive integer.`,
+        });
+        response.id = message.id;
+        this.send(ws, response);
+        return;
+      }
+
+      // Create ParallelExecutor with validated options
       const executor = new ParallelExecutor(
         this.options.baseConfig,
         this.options.tracker,

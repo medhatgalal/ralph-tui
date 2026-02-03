@@ -2432,6 +2432,10 @@ export async function executeRunCommand(args: string[]): Promise<void> {
       const { filteredTasks, message } = filterTasksByRange(tasks, options.taskRange);
       tasks = filteredTasks;
       console.log(`📊 ${message}`);
+
+      // Set filtered task IDs on config so ExecutionEngine respects the filter
+      // This is needed because ExecutionEngine calls tracker.getNextTask() directly
+      config.filteredTaskIds = filteredTasks.map((t) => t.id);
     }
   } catch (error) {
     console.error(
@@ -2676,10 +2680,16 @@ export async function executeRunCommand(args: string[]): Promise<void> {
       // Resolve directMerge: CLI flag takes precedence over config
       const directMerge = options.directMerge ?? storedConfig?.parallel?.directMerge ?? false;
 
+      // Get filtered task IDs for ParallelExecutor (if --task-range was used)
+      const filteredTaskIds = options.taskRange
+        ? actionableTasks.map((t) => t.id)
+        : undefined;
+
       const parallelExecutor = new ParallelExecutor(config, tracker, {
         maxWorkers,
         worktreeDir: storedConfig?.parallel?.worktreeDir,
         directMerge,
+        filteredTaskIds,
       });
 
       // Track session branch info for completion guidance

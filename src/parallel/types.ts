@@ -323,6 +323,13 @@ export interface ParallelExecutorConfig {
    * of merging directly to the current branch.
    */
   directMerge?: boolean;
+
+  /**
+   * Optional list of task IDs to execute. When provided, only tasks with these
+   * IDs will be executed, filtering out any others returned by the tracker.
+   * Used for --task-range filtering.
+   */
+  filteredTaskIds?: string[];
 }
 
 /**

@@ -1129,6 +1129,14 @@ export class RemoteClient {
           } else if (message.type === 'engine_event') {
             const engineEventMsg = message as EngineEventMessage;
             this.eventHandler({ type: 'engine_event', event: engineEventMsg.event });
+          } else if (message.type === 'parallel_event') {
+            // Forward parallel events during reconnect (same as primary handler)
+            const parallelEventMsg = message as ParallelEventMessage;
+            this.eventHandler({
+              type: 'parallel_event',
+              orchestrationId: parallelEventMsg.orchestrationId,
+              event: parallelEventMsg.event,
+            });
           } else {
             // Check for pending request responses
             const pending = this.pendingRequests.get(message.id);
