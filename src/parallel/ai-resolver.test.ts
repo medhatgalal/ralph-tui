@@ -3,7 +3,7 @@
  * Tests fast-path heuristics, prompt building, content extraction, and the resolver callback.
  */
 
-import { describe, expect, test, mock } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import {
   tryFastPathResolution,
   buildConflictPrompt,
