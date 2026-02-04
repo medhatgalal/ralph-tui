@@ -1,7 +1,7 @@
 /**
  * ABOUTME: Conflict resolution overlay for parallel execution merge conflicts.
  * Displays conflicting files with AI resolution status and provides keyboard
- * controls for accepting, rejecting, or aborting conflict resolution.
+ * controls for retry, skip, or abort when resolution fails.
  * Follows the same overlay pattern as HelpOverlay.
  */
 
@@ -28,6 +28,46 @@ export interface ConflictResolutionPanelProps {
   aiResolving: boolean;
   /** Index of the file currently selected */
   selectedIndex: number;
+  /** Callback when user requests retry (r key) */
+  onRetry?: () => void;
+  /** Callback when user requests skip (s key) */
+  onSkip?: () => void;
+}
+
+/**
+ * Resolution state for determining which controls to show.
+ */
+type ResolutionState = 'in-progress' | 'all-resolved' | 'has-failures' | 'waiting';
+
+/**
+ * Determine the overall resolution state.
+ */
+function getResolutionState(
+  conflicts: FileConflict[],
+  resolutions: ConflictResolutionResult[],
+  aiResolving: boolean,
+): ResolutionState {
+  if (aiResolving) {
+    return 'in-progress';
+  }
+
+  if (resolutions.length === 0) {
+    return 'waiting';
+  }
+
+  const hasFailures = resolutions.some((r) => !r.success);
+  if (hasFailures) {
+    return 'has-failures';
+  }
+
+  const allResolved = conflicts.every((c) =>
+    resolutions.some((r) => r.filePath === c.filePath && r.success)
+  );
+  if (allResolved) {
+    return 'all-resolved';
+  }
+
+  return 'waiting';
 }
 
 /**
@@ -78,6 +118,8 @@ export const ConflictResolutionPanel = memo(function ConflictResolutionPanel({
   taskTitle,
   aiResolving,
   selectedIndex,
+  onRetry,
+  onSkip,
 }: ConflictResolutionPanelProps): ReactNode {
   if (!visible) {
     return null;
@@ -85,6 +127,7 @@ export const ConflictResolutionPanel = memo(function ConflictResolutionPanel({
 
   const resolvedCount = resolutions.filter((r) => r.success).length;
   const failedCount = resolutions.filter((r) => !r.success).length;
+  const state = getResolutionState(conflicts, resolutions, aiResolving);
 
   return (
     <box
@@ -104,7 +147,7 @@ export const ConflictResolutionPanel = memo(function ConflictResolutionPanel({
           flexDirection: 'column',
           padding: 2,
           backgroundColor: colors.bg.secondary,
-          borderColor: colors.status.warning,
+          borderColor: state === 'has-failures' ? colors.status.error : colors.status.warning,
           minWidth: 60,
           maxWidth: 80,
         }}
@@ -113,7 +156,15 @@ export const ConflictResolutionPanel = memo(function ConflictResolutionPanel({
         {/* Header */}
         <box style={{ marginBottom: 1, justifyContent: 'center' }}>
           <text>
-            <span fg={colors.status.warning} attributes={boldAttr}>{statusIndicators.conflicted} Merge Conflict Resolution</span>
+            {state === 'has-failures' ? (
+              <span fg={colors.status.error} attributes={boldAttr}>
+                {statusIndicators.error} Conflict Resolution Failed
+              </span>
+            ) : (
+              <span fg={colors.status.warning} attributes={boldAttr}>
+                {statusIndicators.conflicted} Merge Conflict Resolution
+              </span>
+            )}
           </text>
         </box>
 
@@ -133,11 +184,18 @@ export const ConflictResolutionPanel = memo(function ConflictResolutionPanel({
           {failedCount > 0 && <span fg={colors.status.error}>, {failedCount} failed</span>}
         </text>
 
-        {/* AI status */}
-        {aiResolving && (
+        {/* State-specific status message */}
+        {state === 'in-progress' && (
           <text fg={colors.status.info}>
             {statusIndicators.merging} AI conflict resolution in progress...
           </text>
+        )}
+        {state === 'has-failures' && (
+          <box style={{ marginTop: 1, marginBottom: 1 }}>
+            <text fg={colors.status.error}>
+              AI was unable to resolve all conflicts. Choose an action:
+            </text>
+          </box>
         )}
 
         {/* Separator */}
@@ -164,21 +222,47 @@ export const ConflictResolutionPanel = memo(function ConflictResolutionPanel({
           );
         })}
 
-        {/* Footer with keyboard shortcuts */}
+        {/* Footer with keyboard shortcuts - varies by state */}
         <box style={{ marginTop: 1 }}>
           <text fg={colors.border.muted}>{'─'.repeat(56)}</text>
         </box>
-        <text>
-          <span fg={colors.accent.tertiary}>j/↓</span>
-          <span fg={colors.fg.muted}> Down  </span>
-          <span fg={colors.accent.tertiary}>k/↑</span>
-          <span fg={colors.fg.muted}> Up  </span>
-          <span fg={colors.accent.tertiary}>Esc</span>
-          <span fg={colors.fg.muted}> Close Panel</span>
-        </text>
-        <text fg={colors.fg.dim}>
-          AI resolution runs automatically. Merge completes when all files resolve.
-        </text>
+
+        {state === 'has-failures' ? (
+          <>
+            {/* Failure state - show retry/skip/abort options */}
+            <text>
+              <span fg={colors.accent.tertiary}>r</span>
+              <span fg={colors.fg.muted}> Retry AI  </span>
+              <span fg={colors.accent.tertiary}>s</span>
+              <span fg={colors.fg.muted}> Skip Task  </span>
+              <span fg={colors.accent.tertiary}>Esc</span>
+              <span fg={colors.fg.muted}> Abort Session</span>
+            </text>
+            <text fg={colors.fg.dim}>
+              Retry: re-attempt AI resolution. Skip: abandon this task's merge.
+            </text>
+            {!onRetry && !onSkip && (
+              <text fg={colors.fg.dim}>
+                Manual resolution: git merge {`<worktree-branch>`} in project dir
+              </text>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Normal state - navigation only */}
+            <text>
+              <span fg={colors.accent.tertiary}>j/↓</span>
+              <span fg={colors.fg.muted}> Down  </span>
+              <span fg={colors.accent.tertiary}>k/↑</span>
+              <span fg={colors.fg.muted}> Up  </span>
+              <span fg={colors.accent.tertiary}>Esc</span>
+              <span fg={colors.fg.muted}> Close Panel</span>
+            </text>
+            <text fg={colors.fg.dim}>
+              AI resolution runs automatically. Merge completes when all files resolve.
+            </text>
+          </>
+        )}
       </box>
     </box>
   );

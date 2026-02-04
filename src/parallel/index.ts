@@ -15,6 +15,7 @@ import { MergeEngine } from './merge-engine.js';
 import { ConflictResolver, type AiResolverCallback } from './conflict-resolver.js';
 import { Worker } from './worker.js';
 import type {
+  MergeOperation,
   ParallelExecutorConfig,
   ParallelExecutorState,
   ParallelExecutorStatus,
@@ -81,6 +82,12 @@ export class ParallelExecutor {
   /** Track re-queue counts per task to prevent infinite loops */
   private requeueCounts = new Map<string, number>();
 
+  /** Track the operation with pending conflicts for retry/skip */
+  private pendingConflictOperation: MergeOperation | null = null;
+
+  /** Worker result associated with pending conflict (for re-processing) */
+  private pendingConflictWorkerResult: WorkerResult | null = null;
+
   constructor(
     baseConfig: RalphConfig,
     tracker: TrackerPlugin,
@@ -144,6 +151,70 @@ export class ParallelExecutor {
   }
 
   /**
+   * Retry conflict resolution for the pending failed operation.
+   * Returns true if retry was initiated, false if no pending conflict.
+   */
+  async retryConflictResolution(): Promise<boolean> {
+    const operation = this.pendingConflictOperation;
+    const workerResult = this.pendingConflictWorkerResult;
+
+    if (!operation || !workerResult) {
+      return false;
+    }
+
+    // Re-attempt resolution
+    const resolutions = await this.conflictResolver.resolveConflicts(operation);
+    const allResolved = resolutions.every((r) => r.success);
+
+    if (allResolved) {
+      // Success! Clear pending state and mark task as complete
+      this.pendingConflictOperation = null;
+      this.pendingConflictWorkerResult = null;
+
+      try {
+        await this.tracker.completeTask(workerResult.task.id);
+      } catch {
+        // Log but don't fail after successful resolution
+      }
+
+      await this.mergeProgressFile(workerResult);
+      this.totalConflictsResolved += resolutions.length;
+      this.totalMergesCompleted++;
+      return true;
+    }
+
+    // Still failed - keep pending state for another retry
+    return false;
+  }
+
+  /**
+   * Skip the pending failed conflict and continue execution.
+   * The task's merge will be abandoned (task remains incomplete).
+   */
+  skipFailedConflict(): void {
+    if (this.pendingConflictOperation) {
+      // Emit an event so the TUI knows to close the conflict panel
+      this.emitParallel({
+        type: 'conflict:resolved',
+        timestamp: new Date().toISOString(),
+        operationId: this.pendingConflictOperation.id,
+        taskId: this.pendingConflictOperation.workerResult.task.id,
+        results: [], // Empty results indicates skip
+      });
+    }
+
+    this.pendingConflictOperation = null;
+    this.pendingConflictWorkerResult = null;
+  }
+
+  /**
+   * Check if there's a pending conflict operation.
+   */
+  hasPendingConflict(): boolean {
+    return this.pendingConflictOperation !== null;
+  }
+
+  /**
    * Reset internal state so the executor can run again.
    * Call this before `execute()` when restarting after completion or stop.
    */
@@ -161,6 +232,8 @@ export class ParallelExecutor {
     this.startedAt = null;
     this.requeueCounts.clear();
     this.sessionId = `parallel-${Date.now()}`;
+    this.pendingConflictOperation = null;
+    this.pendingConflictWorkerResult = null;
   }
 
   /**
@@ -411,6 +484,8 @@ export class ParallelExecutor {
 
               if (allResolved) {
                 // Conflict resolution succeeded - now mark task as complete
+                this.pendingConflictOperation = null;
+                this.pendingConflictWorkerResult = null;
                 try {
                   await this.tracker.completeTask(result.task.id);
                 } catch {
@@ -422,7 +497,10 @@ export class ParallelExecutor {
                 groupMergesCompleted++;
                 this.totalMergesCompleted++;
               } else {
-                // Conflict resolution failed - don't mark task as complete
+                // Conflict resolution failed - track for retry/skip
+                this.pendingConflictOperation = operation;
+                this.pendingConflictWorkerResult = result;
+                // Don't mark task as complete
                 groupMergesFailed++;
                 await this.handleMergeFailure(result);
               }

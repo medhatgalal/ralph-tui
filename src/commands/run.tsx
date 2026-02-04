@@ -998,12 +998,10 @@ interface RunAppWrapperProps {
   onParallelKill?: () => Promise<void>;
   /** Callback to restart parallel execution after stop/complete */
   onParallelStart?: () => void;
-  /** Callback to abort conflict resolution and rollback the merge */
-  onConflictAbort?: () => Promise<void>;
-  /** Callback to accept AI resolution for a specific file */
-  onConflictAccept?: (filePath: string) => void;
-  /** Callback to accept all AI resolutions */
-  onConflictAcceptAll?: () => void;
+  /** Callback when user requests conflict resolution retry */
+  onConflictRetry?: () => Promise<void>;
+  /** Callback when user requests to skip a failed merge */
+  onConflictSkip?: () => void;
 }
 
 /**
@@ -1051,9 +1049,8 @@ function RunAppWrapper({
   onParallelResume,
   onParallelKill,
   onParallelStart,
-  onConflictAbort,
-  onConflictAccept,
-  onConflictAcceptAll,
+  onConflictRetry,
+  onConflictSkip,
 }: RunAppWrapperProps) {
   const [showInterruptDialog, setShowInterruptDialog] = useState(false);
   const [storedConfig, setStoredConfig] = useState<StoredConfig | undefined>(initialStoredConfig);
@@ -1252,9 +1249,8 @@ function RunAppWrapper({
       onParallelResume={onParallelResume}
       onParallelKill={onParallelKill}
       onParallelStart={onParallelStart}
-      onConflictAbort={onConflictAbort}
-      onConflictAccept={onConflictAccept}
-      onConflictAcceptAll={onConflictAcceptAll}
+      onConflictRetry={onConflictRetry}
+      onConflictSkip={onConflictSkip}
     />
   );
 }
@@ -1880,29 +1876,28 @@ async function runParallelWithTui(
             triggerRerender?.();
           });
         }}
-        onConflictAbort={async () => {
-          // Stop the executor gracefully. Full cleanup (worktrees, git state) is
-          // guaranteed by execute()'s finally block which calls this.cleanup().
-          // We clear UI conflict state in finally to ensure it runs even if stop() rejects.
+        onConflictRetry={async () => {
+          // Re-attempt AI conflict resolution
+          parallelState.aiResolving = true;
+          triggerRerender?.();
           try {
-            await parallelExecutor.stop();
+            const success = await parallelExecutor.retryConflictResolution();
+            if (success) {
+              // Clear conflict state on success
+              clearConflictState(parallelState);
+            }
+          } catch {
+            // Retry failed - state unchanged
           } finally {
-            clearConflictState(parallelState);
+            parallelState.aiResolving = false;
             triggerRerender?.();
           }
         }}
-        onConflictAccept={(filePath: string) => {
-          // Mark file as accepted - the AI resolution continues automatically
-          // This is primarily for user feedback; actual resolution is AI-driven
-          const resolution = findResolutionByPath(parallelState.conflictResolutions, filePath);
-          if (resolution?.success) {
-            // File already resolved by AI - nothing more to do
-            triggerRerender?.();
-          }
-        }}
-        onConflictAcceptAll={() => {
-          // Accept all resolutions - let AI continue and close panel
-          // The AI resolution process continues automatically
+        onConflictSkip={() => {
+          // Skip this failed merge and continue
+          parallelExecutor.skipFailedConflict();
+          // Clear conflict state
+          clearConflictState(parallelState);
           triggerRerender?.();
         }}
       />
