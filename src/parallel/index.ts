@@ -813,10 +813,7 @@ export class ParallelExecutor {
       try {
         await writeFile(filePath, content, 'utf-8');
         // Clear tracker's cache so it re-reads the restored content
-        const tracker = this.tracker as unknown as { clearCache?: () => void };
-        if (typeof tracker.clearCache === 'function') {
-          tracker.clearCache();
-        }
+        this.tracker.clearCache?.();
       } catch {
         // Best effort - log but don't fail
       }

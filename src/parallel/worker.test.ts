@@ -70,6 +70,7 @@ describe('Worker', () => {
     spies.push(spyOn(ExecutionEngine.prototype, 'getState').mockReturnValue({
       status: 'idle',
       currentIteration: 3,
+      currentTask: null,
       tasksCompleted: 1,
       totalTasks: 1,
       iterations: [],

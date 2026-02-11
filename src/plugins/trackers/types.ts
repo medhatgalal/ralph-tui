@@ -391,6 +391,13 @@ export interface TrackerPlugin {
    * @returns Array of absolute file paths that contain tracker state
    */
   getStateFiles?(): string[];
+
+  /**
+   * Clear any internal caches the tracker may have.
+   * Useful after restoring tracker state files from disk to ensure the tracker
+   * re-reads the restored content.
+   */
+  clearCache?(): void;
 }
 
 /**
