@@ -226,6 +226,8 @@ export interface ParallelGroupCompletedEvent extends EngineEventBase {
   tasksFailed: number;
   mergesCompleted: number;
   mergesFailed: number;
+  /** Aggregated errors from failed tasks in this group */
+  errors?: Array<{ taskId: string; error: string }>;
 }
 
 /** Emitted when the entire parallel execution session completes. */
@@ -237,6 +239,8 @@ export interface ParallelCompletedEvent extends EngineEventBase {
   totalMergesCompleted: number;
   totalConflictsResolved: number;
   durationMs: number;
+  /** Aggregated errors from all failed tasks in the session */
+  errors?: Array<{ taskId: string; error: string }>;
 }
 
 /** Emitted when parallel execution fails fatally. */

@@ -79,6 +79,9 @@ export class ParallelExecutor {
   private readonly parallelListeners: ParallelEventListener[] = [];
   private readonly engineListeners: EngineEventListener[] = [];
 
+  /** Aggregated errors from all failed tasks in the session */
+  private allErrors: Array<{ taskId: string; error: string }> = [];
+
   /** Track re-queue counts per task to prevent infinite loops */
   private requeueCounts = new Map<string, number>();
 
@@ -239,6 +242,7 @@ export class ParallelExecutor {
     this.totalConflictsResolved = 0;
     this.startedAt = null;
     this.requeueCounts.clear();
+    this.allErrors = [];
     this.sessionId = `parallel-${Date.now()}`;
     this.pendingConflictOperation = null;
     this.pendingConflictWorkerResult = null;
@@ -326,6 +330,7 @@ export class ParallelExecutor {
         totalMergesCompleted: this.totalMergesCompleted,
         totalConflictsResolved: this.totalConflictsResolved,
         durationMs: Date.now() - new Date(this.startedAt).getTime(),
+        errors: this.allErrors.length > 0 ? [...this.allErrors] : undefined,
       });
     } catch (err) {
       this.status = 'failed';
@@ -448,6 +453,7 @@ export class ParallelExecutor {
     let groupTasksFailed = 0;
     let groupMergesCompleted = 0;
     let groupMergesFailed = 0;
+    const groupErrors: Array<{ taskId: string; error: string }> = [];
 
     for (const batch of batches) {
       if (this.shouldStop) break;
@@ -504,16 +510,25 @@ export class ParallelExecutor {
             } else {
               // AI conflict resolution disabled - mark as failed
               groupMergesFailed++;
+              const error = mergeResult?.error ?? 'Merge conflict (AI resolution disabled)';
+              groupErrors.push({ taskId: result.task.id, error });
+              this.allErrors.push({ taskId: result.task.id, error });
               await this.handleMergeFailure(result);
             }
           } else {
             // Merge failed (non-conflict) - don't mark task as complete
             groupMergesFailed++;
+            const error = mergeResult?.error ?? 'Merge failed';
+            groupErrors.push({ taskId: result.task.id, error });
+            this.allErrors.push({ taskId: result.task.id, error });
             await this.handleMergeFailure(result);
           }
         } else {
           groupTasksFailed++;
           this.totalTasksFailed++;
+          const error = result.error ?? 'Worker execution failed';
+          groupErrors.push({ taskId: result.task.id, error });
+          this.allErrors.push({ taskId: result.task.id, error });
         }
       }
 
@@ -537,8 +552,7 @@ export class ParallelExecutor {
           }
 
           if (allResolved) {
-            // Conflict resolution succeeded - mark task as complete
-            // Only clear pending state if it refers to this conflict (not a different failed one)
+            // ... (rest of success logic)
             if (
               !this.pendingConflictWorkerResult ||
               this.pendingConflictWorkerResult.task.id === workerResult.task.id
@@ -561,6 +575,9 @@ export class ParallelExecutor {
             this.pendingConflictOperation = operation;
             this.pendingConflictWorkerResult = workerResult;
             groupMergesFailed++;
+            const error = 'AI conflict resolution failed';
+            groupErrors.push({ taskId: workerResult.task.id, error });
+            this.allErrors.push({ taskId: workerResult.task.id, error });
             await this.handleMergeFailure(workerResult);
           }
         }
@@ -576,6 +593,7 @@ export class ParallelExecutor {
       tasksFailed: groupTasksFailed,
       mergesCompleted: groupMergesCompleted,
       mergesFailed: groupMergesFailed,
+      errors: groupErrors.length > 0 ? groupErrors : undefined,
     });
   }
 

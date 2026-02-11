@@ -16,6 +16,10 @@ Add a `[parallel]` section to your `.ralph-tui/config.toml`:
 mode = "auto"                           # auto | always | never
 maxWorkers = 3                          # Maximum concurrent workers
 directMerge = false                     # Merge directly to current branch (vs session branch)
+
+[parallel.conflictResolution]
+enabled = true                          # Enable AI-powered conflict resolution
+timeoutMs = 120000                      # Timeout for AI per file (ms)
 ```
 
 ### Options
@@ -26,6 +30,8 @@ directMerge = false                     # Merge directly to current branch (vs s
 | `maxWorkers` | number | `3` | Maximum concurrent workers (worktrees) |
 | `directMerge` | boolean | `false` | If true, merge directly to current branch; if false (default), create a session branch |
 | `worktreeDir` | string | `"../.ralph-worktrees/<project>"` | Directory for git worktrees (as sibling of project) |
+| `conflictResolution.enabled` | boolean | `true` | Enable automated AI resolution for merge conflicts |
+| `conflictResolution.timeoutMs` | number | `120000` | Timeout in milliseconds for AI resolution per file |
 
 ### Mode Behavior
 

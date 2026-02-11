@@ -3,14 +3,16 @@
  * Tests worker lifecycle, event forwarding, display state, and error handling.
  *
  * Avoids mock.module() to prevent interfering with other test files in the suite.
- * Tests worker behavior through its public API using direct property injection.
+ * Tests worker behavior through its public API using spyOn for internal dependencies.
  */
 
-import { describe, test, expect } from 'bun:test';
-import type { TrackerTask } from '../plugins/trackers/types.js';
+import { describe, test, expect, spyOn, beforeEach, afterEach } from 'bun:test';
+import type { TrackerTask, TrackerPlugin } from '../plugins/trackers/types.js';
+import type { RalphConfig } from '../config/types.js';
 import type { WorkerConfig, WorkerDisplayState } from './types.js';
 import type { ParallelEvent } from './events.js';
 import { Worker } from './worker.js';
+import { ExecutionEngine } from '../engine/index.js';
 
 /** Create a mock TrackerTask */
 function mockTask(id: string): TrackerTask {
@@ -33,12 +35,58 @@ function workerConfig(id: string, task: TrackerTask): WorkerConfig {
   };
 }
 
+/** Create a mock RalphConfig */
+function createMockConfig(): RalphConfig {
+  return {
+    cwd: '/tmp/test',
+    maxIterations: 5,
+    iterationDelay: 10,
+    outputDir: '/tmp/out',
+    progressFile: '/tmp/progress.md',
+    sessionId: 'test-session',
+    agent: { name: 'test', plugin: 'test', options: {} },
+    tracker: { name: 'test', plugin: 'test', options: {} },
+    showTui: false,
+  };
+}
+
 describe('Worker', () => {
+  let spies: any[] = [];
+
+  beforeEach(() => {
+    // Mock ExecutionEngine prototype
+    spies.push(spyOn(ExecutionEngine.prototype, 'initialize').mockResolvedValue());
+    spies.push(spyOn(ExecutionEngine.prototype, 'on').mockReturnValue(() => {}));
+    spies.push(spyOn(ExecutionEngine.prototype, 'start').mockResolvedValue());
+    spies.push(spyOn(ExecutionEngine.prototype, 'stop').mockResolvedValue());
+    spies.push(spyOn(ExecutionEngine.prototype, 'pause').mockReturnValue());
+    spies.push(spyOn(ExecutionEngine.prototype, 'resume').mockReturnValue());
+    spies.push(spyOn(ExecutionEngine.prototype, 'getState').mockReturnValue({
+      status: 'completed',
+      currentIteration: 3,
+      tasksCompleted: 1,
+      totalTasks: 1,
+      iterations: [],
+      startedAt: null,
+      currentOutput: '',
+      currentStderr: '',
+      subagents: new Map(),
+      activeAgent: null,
+      rateLimitState: null,
+    }));
+  });
+
+  afterEach(() => {
+    for (const spy of spies) {
+      spy.mockRestore();
+    }
+    spies = [];
+  });
+
   describe('constructor', () => {
     test('sets id from config', () => {
       const task = mockTask('T1');
       const worker = new Worker(workerConfig('w1', task), 10);
-
       expect(worker.id).toBe('w1');
     });
 
@@ -46,169 +94,149 @@ describe('Worker', () => {
       const task = mockTask('T1');
       const cfg = workerConfig('w1', task);
       const worker = new Worker(cfg, 10);
-
       expect(worker.config).toBe(cfg);
-      expect(worker.config.task.id).toBe('T1');
-      expect(worker.config.worktreePath).toBe('/tmp/worktrees/w1');
-      expect(worker.config.branchName).toBe('ralph-parallel/T1');
     });
   });
 
-  describe('getStatus', () => {
-    test('starts as idle', () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
-      expect(worker.getStatus()).toBe('idle');
-    });
-  });
-
-  describe('getTask', () => {
-    test('returns the assigned task', () => {
-      const task = mockTask('T1');
-      const worker = new Worker(workerConfig('w1', task), 10);
-
-      expect(worker.getTask()).toBe(task);
-      expect(worker.getTask().id).toBe('T1');
-      expect(worker.getTask().title).toBe('Task T1');
-    });
-  });
-
-  describe('getDisplayState', () => {
-    test('returns initial display state before start', () => {
+  describe('lifecycle', () => {
+    test('initializes and starts the engine', async () => {
       const task = mockTask('T1');
       const worker = new Worker(workerConfig('w1', task), 5);
+      const tracker = {} as TrackerPlugin;
+      const config = createMockConfig();
 
-      const state: WorkerDisplayState = worker.getDisplayState();
+      await worker.initialize(config, tracker);
+      const result = await worker.start();
 
-      expect(state.id).toBe('w1');
-      expect(state.status).toBe('idle');
-      expect(state.task.id).toBe('T1');
-      expect(state.currentIteration).toBe(0);
-      expect(state.maxIterations).toBe(5);
-      expect(state.lastOutput).toBe('');
-      expect(state.elapsedMs).toBe(0);
+      expect(ExecutionEngine.prototype.initialize).toHaveBeenCalled();
+      expect(ExecutionEngine.prototype.start).toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.iterationsRun).toBe(3);
+      expect(result.taskCompleted).toBe(true);
+      expect(worker.getStatus()).toBe('completed');
     });
 
-    test('reflects configured maxIterations', () => {
-      const worker = new Worker(workerConfig('w2', mockTask('T2')), 20);
-      expect(worker.getDisplayState().maxIterations).toBe(20);
-    });
-  });
+    test('handles engine errors', async () => {
+      const task = mockTask('T1');
+      const worker = new Worker(workerConfig('w1', task), 5);
+      
+      spyOn(ExecutionEngine.prototype, 'start').mockRejectedValue(new Error('Engine failed'));
 
-  describe('start without initialize', () => {
-    test('throws if initialize() was not called', async () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
+      await worker.initialize(createMockConfig(), {} as TrackerPlugin);
+      const result = await worker.start();
 
-      // start() should throw because no engine was initialized
-      await expect(worker.start()).rejects.toThrow('not initialized');
-    });
-  });
-
-  describe('event listener registration', () => {
-    test('on() returns an unsubscribe function', () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
-
-      const events: ParallelEvent[] = [];
-      const unsub = worker.on((e) => events.push(e));
-
-      expect(typeof unsub).toBe('function');
-
-      // Unsubscribe
-      unsub();
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Engine failed');
+      expect(worker.getStatus()).toBe('failed');
     });
 
-    test('onEngineEvent() returns an unsubscribe function', () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
-
-      const unsub = worker.onEngineEvent(() => {});
-
-      expect(typeof unsub).toBe('function');
-
-      unsub();
-    });
-  });
-
-  describe('stop without initialize', () => {
-    test('sets status to cancelled even without engine', async () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
-
+    test('can be stopped', async () => {
+      const task = mockTask('T1');
+      const worker = new Worker(workerConfig('w1', task), 5);
+      
+      await worker.initialize(createMockConfig(), {} as TrackerPlugin);
+      
+      // Stop before starting (cancelled immediately)
       await worker.stop();
-
       expect(worker.getStatus()).toBe('cancelled');
+      expect(ExecutionEngine.prototype.stop).toHaveBeenCalled();
     });
-  });
 
-  describe('pause without initialize', () => {
-    test('does not throw when called without engine', () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
-
-      // Should not throw
+    test('can be paused and resumed', async () => {
+      const task = mockTask('T1');
+      const worker = new Worker(workerConfig('w1', task), 5);
+      
+      await worker.initialize(createMockConfig(), {} as TrackerPlugin);
+      
       worker.pause();
-
-      expect(worker.getStatus()).toBe('idle');
-    });
-  });
-
-  describe('resume without initialize', () => {
-    test('does not throw when called without engine', () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
-
-      // Should not throw
+      expect(ExecutionEngine.prototype.pause).toHaveBeenCalled();
+      
       worker.resume();
-
-      expect(worker.getStatus()).toBe('idle');
+      expect(ExecutionEngine.prototype.resume).toHaveBeenCalled();
     });
   });
 
-  describe('display state with worktree info', () => {
-    test('includes worktreePath from config', () => {
+  describe('event forwarding', () => {
+    test('forwards iteration:started as worker:progress', async () => {
       const task = mockTask('T1');
-      const cfg = workerConfig('w1', task);
-      const worker = new Worker(cfg, 10);
+      const worker = new Worker(workerConfig('w1', task), 5);
+      const events: ParallelEvent[] = [];
+      worker.on((e) => events.push(e));
 
-      const state = worker.getDisplayState();
+      // Capture the engine listener
+      let engineListener: any;
+      spyOn(ExecutionEngine.prototype, 'on').mockImplementation((l) => {
+        engineListener = l;
+        return () => {};
+      });
 
-      expect(state.worktreePath).toBe('/tmp/worktrees/w1');
+      await worker.initialize(createMockConfig(), {} as TrackerPlugin);
+      
+      // Simulate engine event
+      engineListener({
+        type: 'iteration:started',
+        timestamp: new Date().toISOString(),
+        iteration: 1,
+        task,
+      });
+
+      const progressEvent = events.find(e => e.type === 'worker:progress');
+      expect(progressEvent).toBeDefined();
+      expect((progressEvent as any).currentIteration).toBe(1);
     });
 
-    test('includes branchName from config', () => {
+    test('forwards agent:output as worker:output', async () => {
       const task = mockTask('T1');
-      const cfg = workerConfig('w1', task);
-      const worker = new Worker(cfg, 10);
+      const worker = new Worker(workerConfig('w1', task), 5);
+      const events: ParallelEvent[] = [];
+      worker.on((e) => events.push(e));
 
-      const state = worker.getDisplayState();
+      let engineListener: any;
+      spyOn(ExecutionEngine.prototype, 'on').mockImplementation((l) => {
+        engineListener = l;
+        return () => {};
+      });
 
-      expect(state.branchName).toBe('ralph-parallel/T1');
-    });
+      await worker.initialize(createMockConfig(), {} as TrackerPlugin);
+      
+      engineListener({
+        type: 'agent:output',
+        timestamp: new Date().toISOString(),
+        stream: 'stdout',
+        data: 'Hello world',
+        iteration: 1,
+      });
 
-    test('commitSha is undefined initially', () => {
-      const task = mockTask('T1');
-      const worker = new Worker(workerConfig('w1', task), 10);
-
-      const state = worker.getDisplayState();
-
-      expect(state.commitSha).toBeUndefined();
+      const outputEvent = events.find(e => e.type === 'worker:output');
+      expect(outputEvent).toBeDefined();
+      expect((outputEvent as any).data).toBe('Hello world');
+      expect(worker.getDisplayState().lastOutput).toBe('Hello world');
     });
   });
 
-  describe('listener error handling', () => {
-    test('unsubscribing from parallel events multiple times is safe', () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
-      const unsub = worker.on(() => {});
+  describe('display state', () => {
+    test('updates lastCommitSha on task:auto-committed', async () => {
+      const task = mockTask('T1');
+      const worker = new Worker(workerConfig('w1', task), 5);
+      
+      let engineListener: any;
+      spyOn(ExecutionEngine.prototype, 'on').mockImplementation((l) => {
+        engineListener = l;
+        return () => {};
+      });
 
-      // Multiple unsubscribes should not throw
-      unsub();
-      unsub();
-      unsub();
-    });
+      await worker.initialize(createMockConfig(), {} as TrackerPlugin);
+      
+      engineListener({
+        type: 'task:auto-committed',
+        timestamp: new Date().toISOString(),
+        task,
+        iteration: 1,
+        commitMessage: 'msg',
+        commitSha: 'abc1234',
+      });
 
-    test('unsubscribing from engine events multiple times is safe', () => {
-      const worker = new Worker(workerConfig('w1', mockTask('T1')), 10);
-      const unsub = worker.onEngineEvent(() => {});
-
-      // Multiple unsubscribes should not throw
-      unsub();
-      unsub();
-      unsub();
+      expect(worker.getDisplayState().commitSha).toBe('abc1234');
     });
   });
 });

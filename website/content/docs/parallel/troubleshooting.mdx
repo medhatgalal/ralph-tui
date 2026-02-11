@@ -64,11 +64,18 @@ git for-each-ref --format='%(refname:short)' refs/heads/ralph-parallel/ | \
 2. The conflicting task is re-queued to run sequentially
 3. If re-queue also fails, the task is marked as failed
 
-**Prevention:**
+## Tracker File Conflicts
 
-- Structure tasks to touch different files/directories
-- Use explicit `dependsOn` relationships for tasks that share files
-- Lower `maxWorkers` to reduce concurrent file changes
+**Symptom:** Tracker status (beads, JSON) is overwritten or produces a conflict after a parallel run.
+
+**Cause:** Git merge merged a stale version of the tracker file from a worker branch back into the main branch.
+
+**Prevention:** Ralph includes built-in protection that saves the main tracker state before a merge and restores it afterward. This ensures that only the main process (the ParallelExecutor) can permanently update task statuses.
+
+**Fix:** If you suspect tracker state is inconsistent:
+1. Run `ralph-tui doctor` to check tracker health.
+2. For beads: `bd list` to verify tasks.
+3. If files were corrupted by a bad merge, use `git checkout HEAD -- .beads/` (or your JSON file) to restore from the last clean commit.
 
 ## Disk Space Issues
 
